@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Environment & Secrets
+.env
+.env.local
+
+# Python / DB
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+
+# Build outputs
+dist/
+build/
+
+# Data & Uploads
+data/uploads/*
+!data/uploads/.gitkeep
+data/results/*
+!data/results/.gitkeep
+
+# IDE & System
+.DS_Store
+.vscode/
+.idea/
