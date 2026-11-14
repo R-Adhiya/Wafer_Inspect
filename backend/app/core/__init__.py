@@ -1,1 +1,1 @@
-# Placeholder
+"""Core configuration and logging package."""

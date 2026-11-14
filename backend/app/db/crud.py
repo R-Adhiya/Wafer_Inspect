@@ -1,1 +1,1 @@
-# Placeholder
+"""Database CRUD operations."""

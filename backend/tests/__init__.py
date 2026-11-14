@@ -1,1 +1,1 @@
-# Placeholder
+"""Tests package for WaferInspect backend."""

@@ -1,1 +1,1 @@
-# Placeholder
+"""Defect classification model architecture definition."""

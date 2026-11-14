@@ -1,1 +1,1 @@
-# Placeholder
+"""Model inference and defect classification runtime."""
