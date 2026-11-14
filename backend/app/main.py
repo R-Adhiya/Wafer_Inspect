@@ -2,8 +2,10 @@
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from app.api.routes import inspection
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 
@@ -34,7 +36,21 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Ensure no unhandled stack traces are leaked to clients in responses."""
+    logger.error("Unhandled exception processing request '%s': %s", request.url.path, str(exc), exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {"code": "INTERNAL_ERROR", "message": "An unexpected internal error occurred."}},
+    )
+
+
 @app.get("/health")
 def get_health() -> Dict[str, str]:
     """Return operational status and service identifier."""
     return {"status": "ok", "service": "waferinspect-backend"}
+
+
+# Mount API routers
+app.include_router(inspection.router)

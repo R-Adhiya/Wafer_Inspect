@@ -1,20 +1,35 @@
 """Application settings configuration using pydantic-settings."""
 
 import json
+from pathlib import Path
 from typing import List, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT_DIR: Path = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or defaults."""
 
     DATABASE_URL: str = "sqlite:///./waferinspect.db"
-    MAX_UPLOAD_SIZE: int = 20971520
+    MAX_UPLOAD_SIZE: int = 20971520  # 20 MB default
     MODEL_PATH: str = "models/waferinspect_model.pt"
     LOG_LEVEL: str = "INFO"
     API_BASE_URL: str = "http://localhost:8000"
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
+
+    # Image upload and validation settings
+    UPLOAD_DIR: str = "data/uploads"
+    MIN_IMAGE_DIMENSION: int = 64
+    MAX_IMAGE_DIMENSION: int = 8192
+    MAX_IMAGE_PIXELS: int = 67108864  # 8192 * 8192
+
+    @property
+    def upload_path(self) -> Path:
+        """Resolve upload directory path relative to project root if not absolute."""
+        p = Path(self.UPLOAD_DIR)
+        return p if p.is_absolute() else (ROOT_DIR / p).resolve()
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
