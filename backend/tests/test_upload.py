@@ -269,3 +269,29 @@ def test_get_image_serving_and_bad_upload_id():
     invalid_kind_res = client.get(f"/inspection/upload/{upload_id}/invalid_kind")
     assert invalid_kind_res.status_code == 400
     assert invalid_kind_res.json()["detail"]["code"] == "INVALID_KIND"
+
+
+def test_image_smaller_than_minimum_dimensions():
+    """Verify images smaller than minimum dimension (64x64) are rejected with 422."""
+    small_bytes = create_synthetic_image(width=32, height=32, mode="L", image_format="PNG")
+    response = client.post(
+        "/inspection/upload",
+        files={"test_image": ("small_wafer.png", small_bytes, "image/png")},
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "DIMENSIONS_TOO_SMALL"
+
+
+def test_image_larger_than_maximum_dimensions(monkeypatch):
+    """Verify images exceeding maximum dimension are rejected with 422."""
+    monkeypatch.setattr(settings, "MAX_IMAGE_DIMENSION", 200)
+    large_bytes = create_synthetic_image(width=256, height=256, mode="L", image_format="PNG")
+    response = client.post(
+        "/inspection/upload",
+        files={"test_image": ("large_wafer.png", large_bytes, "image/png")},
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "DIMENSIONS_TOO_LARGE"
+

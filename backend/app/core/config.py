@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # Image upload and validation settings
     UPLOAD_DIR: str = "data/uploads"
+    RESULTS_DIR: str = "data/results"
     MIN_IMAGE_DIMENSION: int = 64
     MAX_IMAGE_DIMENSION: int = 8192
     MAX_IMAGE_PIXELS: int = 67108864  # 8192 * 8192
@@ -29,6 +30,12 @@ class Settings(BaseSettings):
     def upload_path(self) -> Path:
         """Resolve upload directory path relative to project root if not absolute."""
         p = Path(self.UPLOAD_DIR)
+        return p if p.is_absolute() else (ROOT_DIR / p).resolve()
+
+    @property
+    def results_path(self) -> Path:
+        """Resolve results directory path relative to project root if not absolute."""
+        p = Path(self.RESULTS_DIR)
         return p if p.is_absolute() else (ROOT_DIR / p).resolve()
 
     @field_validator("CORS_ORIGINS", mode="before")

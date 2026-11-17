@@ -19,6 +19,32 @@ export interface UploadInspectionResponse {
   reference_warning?: string | null;
 }
 
+export interface ImageStats {
+  width: number;
+  height: number;
+  mean: number;
+  std: number;
+}
+
+export interface StepLogItem {
+  step: string;
+  parameters: Record<string, any>;
+  applied: boolean;
+  reason: string;
+  duration_ms: number;
+  mean: number;
+  std: number;
+}
+
+export interface InspectionRunResponse {
+  upload_id: string;
+  step_log: StepLogItem[];
+  original_stats: ImageStats;
+  preprocessed_stats: ImageStats;
+  original_image_url: string;
+  preprocessed_image_url: string;
+}
+
 export interface ApiErrorDetail {
   code?: string;
   message: string;
@@ -96,4 +122,56 @@ export async function uploadInspection(
  */
 export function getUploadImageUrl(uploadId: string, kind: 'test' | 'reference'): string {
   return `${API_BASE_URL}/inspection/upload/${encodeURIComponent(uploadId)}/${kind}`;
+}
+
+/**
+ * Executes CV preprocessing on an uploaded wafer inspection session.
+ */
+export async function runInspection(
+  uploadId: string,
+  configOverrides?: Record<string, any>
+): Promise<InspectionRunResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      upload_id: uploadId,
+      config: configOverrides || null,
+    }),
+  });
+
+  if (!response.ok) {
+    let errorCode: string | undefined = undefined;
+    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) {
+        if (typeof errJson.detail === 'object') {
+          errorCode = errJson.detail.code;
+          errorMessage = errJson.detail.message || errorMessage;
+        } else {
+          errorMessage = String(errJson.detail);
+        }
+      }
+    } catch {
+      // JSON decode failure fallback
+    }
+
+    const err = new Error(errorMessage);
+    (err as unknown as { code?: string }).code = errorCode;
+    throw err;
+  }
+
+  return response.json();
+}
+
+/**
+ * Constructs preview URL for original or preprocessed run images.
+ */
+export function getRunImageUrl(uploadId: string, kind: 'original' | 'preprocessed'): string {
+  return `${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/image/${kind}`;
 }

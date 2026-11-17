@@ -1,10 +1,19 @@
-"""API route handlers for inspection workflows and image upload."""
+"""API route handlers for inspection workflows, image upload, and pipeline execution."""
 
 from typing import Optional
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
-from app.db.schemas import UploadInspectionResponse
+
+from app.db.schemas import (
+    InspectionRunRequest,
+    InspectionRunResponse,
+    UploadInspectionResponse,
+)
 from app.services.image_service import get_image_file_path, process_and_store_upload
+from app.services.inspection_service import (
+    get_run_image_file_path,
+    run_inspection_pipeline,
+)
 
 router = APIRouter(prefix="/inspection", tags=["Inspection"])
 
@@ -28,6 +37,30 @@ def get_uploaded_image(
 ) -> FileResponse:
     """Serve a previously uploaded test or reference image."""
     file_path, media_type = get_image_file_path(upload_id=upload_id, kind=kind)
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+    )
+
+
+@router.post("/run", response_model=InspectionRunResponse)
+def run_inspection(
+    payload: InspectionRunRequest,
+) -> InspectionRunResponse:
+    """Execute preprocessing pipeline on an uploaded wafer test image."""
+    return run_inspection_pipeline(
+        upload_id=payload.upload_id,
+        config_overrides=payload.config,
+    )
+
+
+@router.get("/run/{upload_id}/image/{kind}")
+def get_run_image(
+    upload_id: str,
+    kind: str,
+) -> FileResponse:
+    """Serve either original or preprocessed image from an inspection run."""
+    file_path, media_type = get_run_image_file_path(upload_id=upload_id, kind=kind)
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
