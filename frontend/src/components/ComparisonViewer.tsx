@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AcceptedRegion, getRunImageUrl, RunImageKind } from '../services/api';
+import { AcceptedRegion, getRunImageUrl, resolveApiUrl, RunImageKind } from '../services/api';
 import { useInspectionSelection } from '../context/InspectionSelectionContext';
 import {
   computeFitTransform,
@@ -27,6 +27,7 @@ export interface ComparisonViewerProps {
   imageWidth: number;
   imageHeight: number;
   regions: AcceptedRegion[];
+  imageUrls?: Record<string, string>;
 }
 
 export const ComparisonViewer: React.FC<ComparisonViewerProps> = ({
@@ -34,6 +35,7 @@ export const ComparisonViewer: React.FC<ComparisonViewerProps> = ({
   imageWidth,
   imageHeight,
   regions,
+  imageUrls,
 }) => {
   const { activeTab, setActiveTab, zoomRequest, clearZoomRequest } = useInspectionSelection();
 
@@ -175,8 +177,12 @@ export const ComparisonViewer: React.FC<ComparisonViewerProps> = ({
   };
 
   const activeLabel = VIEWER_TABS.find((t) => t.key === activeTab)?.label ?? activeTab;
-  const activeImgSrc = getRunImageUrl(uploadId, activeTab);
-  const originalImgSrc = getRunImageUrl(uploadId, 'original');
+  const activeImgSrc = imageUrls?.[activeTab]
+    ? resolveApiUrl(imageUrls[activeTab])
+    : getRunImageUrl(uploadId, activeTab);
+  const originalImgSrc = imageUrls?.original
+    ? resolveApiUrl(imageUrls.original)
+    : getRunImageUrl(uploadId, 'original');
   const transformCss = `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`;
 
   return (

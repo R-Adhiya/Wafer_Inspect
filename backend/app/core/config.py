@@ -18,7 +18,7 @@ DETECTION_METHOD_LABEL: str = "Classical CV Baseline"
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or defaults."""
 
-    DATABASE_URL: str = "sqlite:///./waferinspect.db"
+    DATABASE_URL: str = f"sqlite:///{(ROOT_DIR / 'data' / 'waferinspect.db').as_posix()}"
     MAX_UPLOAD_SIZE: int = 20971520  # 20 MB default
     MODEL_PATH: str = "models/waferinspect_model.pt"
     LOG_LEVEL: str = "INFO"

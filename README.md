@@ -32,6 +32,24 @@ After measuring and classifying individual defects, WaferInspect runs wafer-leve
 - **Real wafer images untested**: Performance on real brightfield/darkfield optical or SEM fab wafer imagery (with non-integer die pitch, optical distortion, lens vignetting, or wafer-edge bevel glare) has not been tested.
 - **Uncalibrated prototype**: Measurements are reported in uncalibrated original image pixels unless the user explicitly provides `pixel_size_um`, and severity tiers (`NONE`/`LOW`/`MEDIUM`/`HIGH`) are a documented prototype heuristic rather than an industrial fab standard.
 
+## Database & Switching to PostgreSQL
+
+WaferInspect persists inspections, defects, and processing run configurations via **SQLAlchemy 2.0** and **Alembic** migrations (see [`docs/schema.md`](docs/schema.md) for the full ER diagram).
+
+- **Default (SQLite)**: Resolves automatically to `sqlite:///<repo root>/data/waferinspect.db` with `PRAGMA foreign_keys=ON` and `PRAGMA journal_mode=WAL`.
+- **Alembic CLI**: Run `alembic -c backend/alembic.ini upgrade head` to initialize or upgrade any target database. Application startup runs the exact same Alembic upgrade path.
+- **Switching to PostgreSQL**: All ORM columns use generic SQLAlchemy types (`JSON`, `Float`, `DateTime(timezone=True)`, `Text`) with zero SQLite-only constructs. To run on PostgreSQL:
+  1. Install a PostgreSQL driver such as `psycopg[binary]` (or `psycopg2-binary`).
+  2. Set `DATABASE_URL` in `.env` or your environment:
+     ```bash
+     DATABASE_URL=postgresql+psycopg://waferinspect:password@localhost:5432/waferinspect
+     ```
+  3. Apply migrations:
+     ```bash
+     alembic -c backend/alembic.ini upgrade head
+     ```
+- **Synthetic Demonstration Seeding**: Run `python scripts/seed_demo_data.py` to execute 16 varied synthetic demonstration wafers through the real CV pipeline and persist them into the database for the Dashboard and History views.
+
 ## Scripts & Utilities
 
 - `scripts/generate_noisy_wafer.py`: Generates synthetic wafer test images (512x512 grayscale) via `backend/app/utils/synthetic.py`, simulating silicon wafer substrate disks, die grids or circuit block tiles, additive Gaussian sensor noise, and illumination gradients.

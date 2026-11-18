@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { getInspectionStatus, InspectionStatusResponse } from '../services/api';
+import {
+  getInspectionStatus,
+  getInspectionStatusById,
+  InspectionStatusResponse,
+} from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 
 export const DEFAULT_PIPELINE_STAGES: string[] = [
@@ -25,23 +29,25 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export interface ProcessingStatusProps {
-  uploadId: string;
+  uploadId?: string;
+  inspectionId?: number;
   isActive: boolean;
   pollIntervalMs?: number;
   pollFn?: (uploadId: string) => Promise<InspectionStatusResponse>;
 }
 
 export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
-  uploadId,
+  uploadId = '',
+  inspectionId,
   isActive,
   pollIntervalMs = 300,
-  pollFn = getInspectionStatus,
+  pollFn,
 }) => {
   const [statusData, setStatusData] = useState<InspectionStatusResponse | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isActive || !uploadId) {
+    if (!isActive || (!uploadId && inspectionId == null)) {
       return;
     }
 
@@ -49,7 +55,11 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
 
     const fetchStatus = async () => {
       try {
-        const res = await pollFn(uploadId);
+        const res = pollFn
+          ? await pollFn(uploadId)
+          : inspectionId != null
+            ? await getInspectionStatusById(inspectionId)
+            : await getInspectionStatus(uploadId);
         if (!cancelled) {
           setStatusData(res);
           setPollError(res.status === 'failed' ? res.error || 'Inspection failed.' : null);
@@ -57,7 +67,6 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
       } catch (err: unknown) {
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : 'Unable to poll status.';
-          // Only surface persistent non-404 status errors
           setPollError(msg);
         }
       }
@@ -72,7 +81,7 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [uploadId, isActive, pollIntervalMs, pollFn]);
+  }, [uploadId, inspectionId, isActive, pollIntervalMs, pollFn]);
 
   const stages = statusData?.stages?.length ? statusData.stages : DEFAULT_PIPELINE_STAGES;
   const completedSet = new Set(statusData?.completed_stages ?? []);

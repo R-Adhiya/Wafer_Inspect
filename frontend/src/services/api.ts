@@ -13,10 +13,12 @@ export interface ImageMetaResponse {
 }
 
 export interface UploadInspectionResponse {
+  inspection_id: number;
   upload_id: string;
   test_image: ImageMetaResponse;
   reference_image?: ImageMetaResponse | null;
   reference_warning?: string | null;
+  disclaimer?: string | null;
 }
 
 export interface ImageStats {
@@ -171,7 +173,10 @@ export type RunImageKind =
   | 'pattern_overlay';
 
 export interface InspectionRunResponse {
+  inspection_id?: number | null;
   upload_id: string;
+  status?: string;
+  created_at?: string | null;
   step_log: StepLogItem[];
   original_stats: ImageStats;
   preprocessed_stats: ImageStats;
@@ -199,9 +204,10 @@ export interface InspectionRunResponse {
   reference_filename?: string | null;
 }
 
-export type RunLifecycleStatus = 'not_started' | 'running' | 'completed' | 'failed';
+export type RunLifecycleStatus = 'not_started' | 'pending' | 'running' | 'completed' | 'failed';
 
 export interface InspectionStatusResponse {
+  inspection_id?: number | null;
   upload_id: string;
   status: RunLifecycleStatus;
   current_stage: string;
@@ -210,6 +216,91 @@ export interface InspectionStatusResponse {
   stages: string[];
   error?: string | null;
   updated_at?: string | null;
+}
+
+export interface HistoryItem {
+  id: number;
+  upload_id: string;
+  status: string;
+  original_filename: string;
+  image_width: number;
+  image_height: number;
+  has_reference: boolean;
+  defect_count: number;
+  total_defect_area: number;
+  largest_defect_area: number;
+  severity?: InspectionSeverity | null;
+  pattern_type?: PatternType | null;
+  pattern_confidence?: number | null;
+  detection_path?: string | null;
+  detection_label?: string | null;
+  detection_method?: string | null;
+  model_name?: string | null;
+  model_version?: string | null;
+  processing_time?: number | null;
+  created_at: string;
+}
+
+export interface HistoryListResponse {
+  items: HistoryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface HistoryQueryParams {
+  search?: string;
+  severity?: string;
+  sort?: 'created_at' | 'defect_count' | 'severity' | 'processing_time';
+  order?: 'asc' | 'desc';
+  page?: number;
+  page_size?: number;
+}
+
+export interface InspectionImagesResponse {
+  inspection_id: number;
+  upload_id: string;
+  images: Record<string, string>;
+}
+
+export interface DeleteInspectionResponse {
+  deleted: boolean;
+  inspection_id: number;
+  upload_id: string;
+}
+
+export interface DashboardStatsResponse {
+  total_inspections: number;
+  total_defects: number;
+  high_severity_inspections: number;
+  average_defect_area: number;
+  recent_inspections: HistoryItem[];
+  recent_defect_counts: {
+    inspection_id: number;
+    filename: string;
+    defect_count: number;
+    severity: string;
+    created_at?: string | null;
+  }[];
+  severity_distribution: { severity: string; count: number }[];
+  defect_area_histogram: { bin: string; count: number }[];
+  pattern_distribution: { pattern_type: string; count: number }[];
+}
+
+export interface SampleItem {
+  name: string;
+  title: string;
+  description: string;
+  category: string;
+  has_reference: boolean;
+  image_size: number;
+  disclaimer: string;
+}
+
+export interface SampleListResponse {
+  disclaimer: string;
+  samples: SampleItem[];
 }
 
 export interface ApiError extends Error {
@@ -304,22 +395,24 @@ export function getUploadImageUrl(uploadId: string, kind: 'test' | 'reference'):
 }
 
 /**
- * Executes CV inspection pipeline on an uploaded wafer session.
+ * Executes CV inspection pipeline on an uploaded wafer session (accepts integer inspection_id or UUID upload_id).
  */
 export async function runInspection(
-  uploadId: string,
+  identifier: number | string,
   configOverrides?: Record<string, any>
 ): Promise<InspectionRunResponse> {
+  const payload =
+    typeof identifier === 'number'
+      ? { inspection_id: identifier, config: configOverrides || null }
+      : { upload_id: identifier, config: configOverrides || null };
+
   const response = await fetch(`${API_BASE_URL}/inspection/run`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({
-      upload_id: uploadId,
-      config: configOverrides || null,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -330,7 +423,141 @@ export async function runInspection(
 }
 
 /**
- * Fetches persisted inspection result for a completed run (GET /inspection/run/{upload_id}/result).
+ * Fetches full inspection report reconstructed from the database (GET /inspection/{id}).
+ */
+export async function getInspectionById(inspectionId: number): Promise<InspectionRunResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/${inspectionId}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Fetches available image artifact URLs for an inspection (GET /inspection/{id}/images).
+ */
+export async function getInspectionImages(inspectionId: number): Promise<InspectionImagesResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/${inspectionId}/images`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Polls live single-process stage status by integer inspection ID (GET /inspection/{id}/status).
+ */
+export async function getInspectionStatusById(inspectionId: number): Promise<InspectionStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/${inspectionId}/status`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Lists paginated, searchable, filterable, and sortable inspection history.
+ */
+export async function getInspectionHistory(
+  params: HistoryQueryParams = {}
+): Promise<HistoryListResponse> {
+  const qs = new URLSearchParams();
+  if (params.search && params.search.trim()) qs.set('search', params.search.trim());
+  if (params.severity && params.severity !== 'ALL') qs.set('severity', params.severity);
+  if (params.sort) qs.set('sort', params.sort);
+  if (params.order) qs.set('order', params.order);
+  if (params.page != null) qs.set('page', String(params.page));
+  if (params.page_size != null) qs.set('page_size', String(params.page_size));
+
+  const queryStr = qs.toString();
+  const url = `${API_BASE_URL}/inspection/history${queryStr ? `?${queryStr}` : ''}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Deletes an inspection and its stored upload/result artifacts (DELETE /inspection/{id}).
+ */
+export async function deleteInspection(inspectionId: number): Promise<DeleteInspectionResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/${inspectionId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Fetches SQL-aggregated dashboard KPIs and chart data (GET /dashboard/stats).
+ */
+export async function getDashboardStats(): Promise<DashboardStatsResponse> {
+  const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Lists synthetic demonstration wafer samples (GET /samples).
+ */
+export async function getSamples(): Promise<SampleListResponse> {
+  const response = await fetch(`${API_BASE_URL}/samples`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Generates and uploads a synthetic demonstration sample through the standard upload path (POST /samples/{name}).
+ */
+export async function createSampleUpload(name: string): Promise<UploadInspectionResponse> {
+  const response = await fetch(`${API_BASE_URL}/samples/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+
+/**
+ * Resolves a backend-relative URL (such as `/inspection/5/image/final_overlay`) against API_BASE_URL.
+ */
+export function resolveApiUrl(pathOrUrl: string): string {
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+    return pathOrUrl;
+  }
+  return `${API_BASE_URL}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
+}
+
+/**
+ * Fetches persisted inspection result by UUID upload_id (compatibility helper).
  */
 export async function getInspectionResult(uploadId: string): Promise<InspectionRunResponse> {
   const response = await fetch(`${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/result`, {

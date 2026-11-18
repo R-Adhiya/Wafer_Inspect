@@ -5,19 +5,43 @@ from typing import AsyncGenerator, Dict
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api.routes import inspection
+
+from app.api.routes import dashboard, inspection, samples
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
+from app.db.database import engine
+from app.db.migrations import upgrade_database_to_head
 
 # Initialize logging configuration at startup
 setup_logging()
 
+_MIGRATED_URLS: set[str] = set()
+
+
+def ensure_startup_migrations(database_url: str) -> None:
+    """Run Alembic upgrade head once per process for a given database URL."""
+    if database_url in _MIGRATED_URLS:
+        return
+    upgrade_database_to_head(database_url)
+    _MIGRATED_URLS.add(database_url)
+
+
+# Ensure schema is upgraded through Alembic once on first module load
+try:
+    ensure_startup_migrations(settings.DATABASE_URL)
+except Exception as exc:
+    logger.error("Failed to apply Alembic migrations at import time: %s", str(exc), exc_info=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan context manager handling startup and shutdown events."""
-    logger.info("WaferInspect backend started successfully")
-    yield
+    """Application lifespan context manager handling Alembic schema upgrades and engine disposal."""
+    ensure_startup_migrations(settings.DATABASE_URL)
+    logger.info("WaferInspect backend started successfully (schema up to date)")
+    try:
+        yield
+    finally:
+        engine.dispose()
 
 
 app = FastAPI(
@@ -26,7 +50,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS restricted strictly to origins in CORS_ORIGINS (default http://localhost:5173), not "*"
+# Configure CORS restricted strictly to origins in CORS_ORIGINS, not "*"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -54,3 +78,5 @@ def get_health() -> Dict[str, str]:
 
 # Mount API routers
 app.include_router(inspection.router)
+app.include_router(dashboard.router)
+app.include_router(samples.router)

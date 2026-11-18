@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ApiError,
+  getInspectionById,
+  getInspectionImages,
   getInspectionResult,
   InspectionRunResponse,
 } from '../services/api';
@@ -16,17 +18,20 @@ import { PipelineTrace } from '../components/PipelineTrace';
 import { ProcessingStatus } from '../components/ProcessingStatus';
 
 export const InspectionReportPage: React.FC = () => {
-  const { uploadId } = useParams<{ uploadId: string }>();
+  const { id } = useParams<{ id: string }>();
 
   const [result, setResult] = useState<InspectionRunResponse | null>(null);
+  const [imageUrls, setImageUrls] = useState<Record<string, string> | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isPendingRun, setIsPendingRun] = useState(false);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [showStepLog, setShowStepLog] = useState(false);
 
+  const numericId = id && /^\d+$/.test(id) ? Number(id) : null;
+
   const loadReport = useCallback(async () => {
-    if (!uploadId) {
-      setError({ message: 'Missing inspection upload ID in URL.', code: 'INVALID_UPLOAD_ID' });
+    if (!id) {
+      setError({ message: 'Missing inspection ID in URL.', code: 'INVALID_ID' });
       setIsLoading(false);
       return;
     }
@@ -36,8 +41,22 @@ export const InspectionReportPage: React.FC = () => {
     setIsPendingRun(false);
 
     try {
-      const data = await getInspectionResult(uploadId);
-      setResult(data);
+      if (numericId != null) {
+        const [data, imgs] = await Promise.all([
+          getInspectionById(numericId),
+          getInspectionImages(numericId).catch(() => null),
+        ]);
+        setResult(data);
+        setImageUrls(imgs?.images);
+      } else {
+        // Legacy UUID URL compatibility
+        const data = await getInspectionResult(id);
+        setResult(data);
+        if (data.inspection_id != null) {
+          const imgs = await getInspectionImages(data.inspection_id).catch(() => null);
+          setImageUrls(imgs?.images);
+        }
+      }
     } catch (err: unknown) {
       const apiErr = err as ApiError;
       if (apiErr.status === 409) {
@@ -51,7 +70,7 @@ export const InspectionReportPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [uploadId]);
+  }, [id, numericId]);
 
   useEffect(() => {
     void loadReport();
@@ -65,7 +84,7 @@ export const InspectionReportPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `waferinspect-report-${result.upload_id}.json`;
+    a.download = `waferinspect-report-${result.inspection_id ?? result.upload_id}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -93,10 +112,14 @@ export const InspectionReportPage: React.FC = () => {
     );
   }
 
-  if (isPendingRun && uploadId) {
+  if (isPendingRun && id) {
     return (
       <div className="max-w-3xl mx-auto space-y-6">
-        <ProcessingStatus uploadId={uploadId} isActive />
+        <ProcessingStatus
+          inspectionId={numericId ?? undefined}
+          uploadId={numericId == null ? id : ''}
+          isActive
+        />
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
@@ -124,12 +147,20 @@ export const InspectionReportPage: React.FC = () => {
           message={error?.message || 'Inspection report not found.'}
           code={error?.code}
         />
-        <Link
-          to="/inspection/new"
-          className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-slate-900"
-        >
-          Start New Inspection
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/history"
+            className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100"
+          >
+            Back to History
+          </Link>
+          <Link
+            to="/inspection/new"
+            className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white"
+          >
+            Start New Inspection
+          </Link>
+        </div>
       </div>
     );
   }
@@ -141,15 +172,23 @@ export const InspectionReportPage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Inspection Report
+              Inspection Report {result.inspection_id != null ? `#${result.inspection_id}` : ''}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Reloadable inspection report for session{' '}
-              <span className="font-mono text-slate-700">{result.upload_id}</span>
+              Database-backed report for{' '}
+              <span className="font-mono text-slate-700">
+                {result.test_filename || result.upload_id}
+              </span>
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              to="/history"
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              History
+            </Link>
             <button
               type="button"
               onClick={handleDownloadJson}
@@ -181,6 +220,7 @@ export const InspectionReportPage: React.FC = () => {
           imageWidth={result.original_stats.width}
           imageHeight={result.original_stats.height}
           regions={result.regions}
+          imageUrls={imageUrls}
         />
 
         {/* 5. Pipeline Interpretability Trace */}
@@ -189,6 +229,7 @@ export const InspectionReportPage: React.FC = () => {
           stageCounts={result.stage_counts}
           rejectedRegions={result.rejected_regions}
           finalDefectCount={result.regions.length}
+          imageUrls={imageUrls}
         />
 
         {/* 6. Sortable & Filterable Defect Table */}

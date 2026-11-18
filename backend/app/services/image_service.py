@@ -6,8 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 from fastapi import HTTPException, UploadFile
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging import logger
+from app.db import crud
+from app.db.database import SessionLocal
 from app.db.schemas import ImageMetaResponse, UploadInspectionResponse
 from app.utils.validators import ValidatedImage, validate_uploaded_image
 
@@ -24,6 +28,8 @@ MIME_TYPE_MAP = {
 async def process_and_store_upload(
     test_image_file: UploadFile,
     reference_image_file: Optional[UploadFile] = None,
+    db: Optional[Session] = None,
+    disclaimer: Optional[str] = None,
 ) -> UploadInspectionResponse:
     """Validate uploaded images and persist them safely under data/uploads/<upload_id>/."""
     # 1. Validate test image (required)
@@ -105,9 +111,44 @@ async def process_and_store_upload(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
-    logger.info("Inspection upload stored successfully: upload_id=%s", upload_id)
+    # Create pending inspections row in database
+    owns_session = db is None
+    session = db if db is not None else SessionLocal()
+    try:
+        inspection_row = crud.create_inspection(
+            session,
+            upload_id=upload_id,
+            original_filename=validated_test.sanitized_filename,
+            image_width=validated_test.width,
+            image_height=validated_test.height,
+            image_mode=validated_test.mode,
+            image_format=validated_test.detected_format,
+            file_size=validated_test.file_size_bytes,
+            has_reference=validated_ref is not None,
+            reference_filename=validated_ref.sanitized_filename if validated_ref is not None else None,
+            status="pending",
+        )
+    except SQLAlchemyError as exc:
+        logger.error("Database failure creating pending inspection for upload_id=%s: %s", upload_id, str(exc), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "DATABASE_ERROR",
+                "message": "Database error while creating inspection record. Please retry.",
+            },
+        )
+    finally:
+        if owns_session:
+            session.close()
+
+    logger.info(
+        "Inspection upload stored successfully: inspection_id=%s, upload_id=%s",
+        inspection_row.id,
+        upload_id,
+    )
 
     return UploadInspectionResponse(
+        inspection_id=inspection_row.id,
         upload_id=upload_id,
         test_image=ImageMetaResponse(
             original_filename=validated_test.sanitized_filename,
@@ -130,6 +171,7 @@ async def process_and_store_upload(
             else None
         ),
         reference_warning=reference_warning,
+        disclaimer=disclaimer,
     )
 
 

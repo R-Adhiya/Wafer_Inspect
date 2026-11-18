@@ -373,7 +373,13 @@ class PreprocessingConfig(BaseModel):
     """Configuration holding validated parameters for the preprocessing pipeline."""
 
     to_grayscale_enabled: bool = Field(default=True, description="Convert input imagery to 8-bit grayscale")
-    max_side: Optional[int] = Field(default=None, description="Max side dimension for aspect-preserving downscaling")
+    max_side: Optional[int] = Field(
+        default=2048,
+        description=(
+            "Max side dimension for aspect-preserving downscaling (default 2048 px; leaves images "
+            "<= 2048 px unchanged while keeping 4096x4096 self-reference under 4 s; see docs/performance.md)"
+        ),
+    )
     denoise_enabled: bool = Field(default=False, description="Apply denoising filter")
     denoise_method: str = Field(default="gaussian", description="Denoise technique: 'gaussian' or 'median'")
     denoise_kernel_size: int = Field(default=5, description="Filter kernel size (must be positive odd integer)")

@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
-import { HomePage } from './pages/HomePage';
+import { DashboardPage } from './pages/DashboardPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { NewInspectionPage } from './pages/NewInspectionPage';
 import { InspectionReportPage } from './pages/InspectionReportPage';
 
@@ -12,9 +13,10 @@ export default function App() {
 
         <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/history" element={<HistoryPage />} />
             <Route path="/inspection/new" element={<NewInspectionPage />} />
-            <Route path="/inspection/:uploadId" element={<InspectionReportPage />} />
+            <Route path="/inspection/:id" element={<InspectionReportPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

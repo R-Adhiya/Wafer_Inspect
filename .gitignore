@@ -40,6 +40,8 @@ dist-ssr/
 *.sqlite
 *.sqlite3
 *.db
+*.db-shm
+*.db-wal
 
 # Data & Models
 data/uploads/*

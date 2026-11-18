@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   getRunImageUrl,
   RejectedRegion,
+  resolveApiUrl,
   RunImageKind,
   StageCount,
 } from '../services/api';
@@ -12,6 +13,7 @@ export interface PipelineTraceProps {
   stageCounts: StageCount[];
   rejectedRegions: RejectedRegion[];
   finalDefectCount: number;
+  imageUrls?: Record<string, string>;
 }
 
 interface TraceStep {
@@ -34,6 +36,7 @@ export const PipelineTrace: React.FC<PipelineTraceProps> = ({
   stageCounts,
   rejectedRegions,
   finalDefectCount,
+  imageUrls,
 }) => {
   const { activeTab, setActiveTab } = useInspectionSelection();
   const [showRejected, setShowRejected] = useState(true);
@@ -125,7 +128,11 @@ export const PipelineTrace: React.FC<PipelineTraceProps> = ({
                   </div>
                   <div className="aspect-square w-full bg-slate-900/10 rounded overflow-hidden flex items-center justify-center mb-1.5">
                     <img
-                      src={getRunImageUrl(uploadId, step.imageKind)}
+                      src={
+                        imageUrls?.[step.imageKind]
+                          ? resolveApiUrl(imageUrls[step.imageKind])
+                          : getRunImageUrl(uploadId, step.imageKind)
+                      }
                       alt={`${step.label} stage thumbnail`}
                       className="w-full h-full object-contain"
                     />

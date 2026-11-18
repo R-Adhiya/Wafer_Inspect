@@ -1,7 +1,7 @@
 """Pydantic schemas and serialization models."""
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ImageMetaResponse(BaseModel):
@@ -18,16 +18,25 @@ class ImageMetaResponse(BaseModel):
 class UploadInspectionResponse(BaseModel):
     """Response contract for POST /inspection/upload."""
 
+    inspection_id: int
     upload_id: str
     test_image: ImageMetaResponse
     reference_image: Optional[ImageMetaResponse] = None
     reference_warning: Optional[str] = None
+    disclaimer: Optional[str] = None
 
 
 class InspectionRunRequest(BaseModel):
-    """Request payload for POST /inspection/run."""
+    """Request payload for POST /inspection/run (accepts inspection_id or legacy upload_id)."""
 
-    upload_id: str = Field(..., description="UUID4 identifier of uploaded inspection session")
+    inspection_id: Optional[int] = Field(
+        default=None,
+        description="Integer database ID of uploaded inspection session",
+    )
+    upload_id: Optional[str] = Field(
+        default=None,
+        description="UUID4 identifier of uploaded inspection session (compatibility alias)",
+    )
     config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional overrides for PreprocessingConfig",
@@ -56,6 +65,12 @@ class InspectionRunRequest(BaseModel):
         default=None,
         description="Optional overrides for PatternConfig",
     )
+
+    @model_validator(mode="after")
+    def _require_identifier(self) -> "InspectionRunRequest":
+        if self.inspection_id is None and not self.upload_id:
+            raise ValueError("Either 'inspection_id' or 'upload_id' must be provided.")
+        return self
 
 
 class ImageStats(BaseModel):
@@ -192,9 +207,12 @@ class DetectionSummaryResponse(BaseModel):
 
 
 class InspectionRunResponse(BaseModel):
-    """Extensible response contract for POST /inspection/run."""
+    """Extensible response contract for POST /inspection/run and GET /inspection/{id}."""
 
+    inspection_id: Optional[int] = None
     upload_id: str
+    status: str = "completed"
+    created_at: Optional[str] = None
     step_log: List[StepLogItem]
     original_stats: ImageStats
     preprocessed_stats: ImageStats
@@ -223,13 +241,121 @@ class InspectionRunResponse(BaseModel):
 
 
 class InspectionStatusResponse(BaseModel):
-    """Live single-process in-memory stage status for GET /inspection/run/{upload_id}/status."""
+    """Live single-process in-memory stage status for GET /inspection/{id}/status."""
 
+    inspection_id: Optional[int] = None
     upload_id: str
-    status: Literal["not_started", "running", "completed", "failed"]
+    status: Literal["not_started", "pending", "running", "completed", "failed"]
     current_stage: str
     completed_stages: List[str] = Field(default_factory=list)
     stage_history: List[str] = Field(default_factory=list)
     stages: List[str] = Field(default_factory=list)
     error: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class HistoryItemResponse(BaseModel):
+    """Summary row returned by GET /inspection/history and recent dashboard list."""
+
+    id: int
+    upload_id: str
+    status: str
+    original_filename: str
+    image_width: int
+    image_height: int
+    has_reference: bool
+    defect_count: int
+    total_defect_area: int
+    largest_defect_area: int
+    severity: Optional[str] = None
+    pattern_type: Optional[str] = None
+    pattern_confidence: Optional[float] = None
+    detection_path: Optional[str] = None
+    detection_label: Optional[str] = None
+    detection_method: Optional[str] = None
+    model_name: Optional[str] = None
+    model_version: Optional[str] = None
+    processing_time: Optional[float] = None
+    created_at: str
+
+
+class HistoryListResponse(BaseModel):
+    """Paginated response contract for GET /inspection/history."""
+
+    items: List[HistoryItemResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class InspectionImagesResponse(BaseModel):
+    """Map of available image artifact kinds to URLs for GET /inspection/{id}/images."""
+
+    inspection_id: int
+    upload_id: str
+    images: Dict[str, str]
+
+
+class DeleteInspectionResponse(BaseModel):
+    """Response contract for DELETE /inspection/{id}."""
+
+    deleted: bool
+    inspection_id: int
+    upload_id: str
+
+
+class RecentDefectCountPoint(BaseModel):
+    inspection_id: int
+    filename: str
+    defect_count: int
+    severity: str
+    created_at: Optional[str] = None
+
+
+class SeverityCountPoint(BaseModel):
+    severity: str
+    count: int
+
+
+class AreaHistogramPoint(BaseModel):
+    bin: str
+    count: int
+
+
+class PatternCountPoint(BaseModel):
+    pattern_type: str
+    count: int
+
+
+class DashboardStatsResponse(BaseModel):
+    """SQL-aggregated KPIs and chart series for GET /dashboard/stats."""
+
+    total_inspections: int
+    total_defects: int
+    high_severity_inspections: int
+    average_defect_area: float
+    recent_inspections: List[HistoryItemResponse]
+    recent_defect_counts: List[RecentDefectCountPoint]
+    severity_distribution: List[SeverityCountPoint]
+    defect_area_histogram: List[AreaHistogramPoint]
+    pattern_distribution: List[PatternCountPoint]
+
+
+class SampleItemResponse(BaseModel):
+    """Metadata for a single synthetic demonstration wafer sample."""
+
+    name: str
+    title: str
+    description: str
+    category: str
+    has_reference: bool
+    image_size: int
+    disclaimer: str = "Synthetic demonstration image"
+
+
+class SampleListResponse(BaseModel):
+    """Response contract for GET /samples."""
+
+    disclaimer: str = "Synthetic demonstration image"
+    samples: List[SampleItemResponse]
