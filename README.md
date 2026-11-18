@@ -25,7 +25,10 @@ After measuring and classifying individual defects, WaferInspect runs wafer-leve
 
 ## Evaluation Limits
 
-- **Synthetic evaluation only**: All detection, segmentation, fragment-merging, and measurement algorithms were developed and evaluated on a deterministic synthetic wafer generator (`backend/app/utils/synthetic.py`) with exactly periodic dies and integer pixel pitch. See [`docs/accuracy.md`](docs/accuracy.md) for the full 1,800-image benchmark table.
+- **Synthetic evaluation only**: All detection, segmentation, fragment-merging, measurement, and spatial pattern algorithms were developed and evaluated on a deterministic synthetic wafer generator (`backend/app/utils/synthetic.py`) with exactly periodic dies and integer pixel pitch. See [`docs/accuracy.md`](docs/accuracy.md), [`docs/measurement_accuracy.md`](docs/measurement_accuracy.md), and [`docs/pattern_accuracy.md`](docs/pattern_accuracy.md) for the full benchmark tables.
+- **Rim defect area under-measurement**: Defects touching the wafer bevel measure roughly **20% low** in area because the 2% inward wafer-edge margin mask clips the outermost rim pixels to prevent bevel false alarms.
+- **Thin low-contrast scratches**: Very narrow, low-contrast scratches (e.g. `T = 2 px`, contrast `30`) are measured poorly because 3×3 denoising attenuates sub-kernel line peaks and breaks low-SNR segments.
+- **Low-count spatial pattern calls**: Spatial pattern diagnoses with **fewer than 5 defects** (`n = 3` or `4`) are tentative and carry an explicit `"low defect count: interpret with caution"` warning.
 - **Real wafer images untested**: Performance on real brightfield/darkfield optical or SEM fab wafer imagery (with non-integer die pitch, optical distortion, lens vignetting, or wafer-edge bevel glare) has not been tested.
 - **Uncalibrated prototype**: Measurements are reported in uncalibrated original image pixels unless the user explicitly provides `pixel_size_um`, and severity tiers (`NONE`/`LOW`/`MEDIUM`/`HIGH`) are a documented prototype heuristic rather than an industrial fab standard.
 

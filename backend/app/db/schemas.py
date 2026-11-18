@@ -114,6 +114,7 @@ class AcceptedRegionResponse(BaseModel):
     area_um2: Optional[float] = None
     length_um: Optional[float] = None
     thickness_um: Optional[float] = None
+    contour: List[Tuple[int, int]] = Field(default_factory=list)
     reason: str = ""
     original_bbox: Optional[Tuple[int, int, int, int]] = None
     original_centroid: Optional[Tuple[float, float]] = None
@@ -215,3 +216,20 @@ class InspectionRunResponse(BaseModel):
     pattern: Optional[PatternResultResponse] = None
     processing_time_s: float = 0.0
     stage_timings_ms: Dict[str, float] = Field(default_factory=dict)
+    test_filename: Optional[str] = None
+    test_mode: Optional[str] = None
+    reference_used: bool = False
+    reference_filename: Optional[str] = None
+
+
+class InspectionStatusResponse(BaseModel):
+    """Live single-process in-memory stage status for GET /inspection/run/{upload_id}/status."""
+
+    upload_id: str
+    status: Literal["not_started", "running", "completed", "failed"]
+    current_stage: str
+    completed_stages: List[str] = Field(default_factory=list)
+    stage_history: List[str] = Field(default_factory=list)
+    stages: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    updated_at: Optional[str] = None

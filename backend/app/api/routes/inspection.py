@@ -7,10 +7,13 @@ from fastapi.responses import FileResponse
 from app.db.schemas import (
     InspectionRunRequest,
     InspectionRunResponse,
+    InspectionStatusResponse,
     UploadInspectionResponse,
 )
 from app.services.image_service import get_image_file_path, process_and_store_upload
 from app.services.inspection_service import (
+    get_inspection_result,
+    get_inspection_status,
     get_run_image_file_path,
     run_inspection_pipeline,
 )
@@ -65,9 +68,25 @@ def get_run_image(
     upload_id: str,
     kind: str,
 ) -> FileResponse:
-    """Serve either original or preprocessed image from an inspection run."""
+    """Serve an image artifact from an inspection run."""
     file_path, media_type = get_run_image_file_path(upload_id=upload_id, kind=kind)
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
     )
+
+
+@router.get("/run/{upload_id}/result", response_model=InspectionRunResponse)
+def get_run_result(
+    upload_id: str,
+) -> InspectionRunResponse:
+    """Return the persisted run.json result for a completed inspection (404 unknown, 409 unfinished)."""
+    return get_inspection_result(upload_id=upload_id)
+
+
+@router.get("/run/{upload_id}/status", response_model=InspectionStatusResponse)
+def get_run_status(
+    upload_id: str,
+) -> InspectionStatusResponse:
+    """Return live single-process in-memory stage status for an inspection run."""
+    return get_inspection_status(upload_id=upload_id)

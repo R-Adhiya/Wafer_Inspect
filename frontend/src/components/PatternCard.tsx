@@ -38,7 +38,18 @@ const PATTERN_LABELS: Record<PatternType, string> = {
 export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
   const badgeStyle = PATTERN_BADGE_STYLES[pattern.type] ?? PATTERN_BADGE_STYLES.INSUFFICIENT_DATA;
   const displayLabel = PATTERN_LABELS[pattern.type] ?? pattern.type;
-  const confidencePct = (pattern.confidence * 100).toFixed(1);
+  const mcFloor = typeof pattern.metrics?.mc_p_floor === 'number' ? pattern.metrics.mc_p_floor : 1 / 2001;
+  const isAtMcFloor =
+    pattern.p_value != null && (pattern.p_value <= mcFloor + 1e-6 || pattern.p_value < 0.001);
+  const confidenceDisplay = isAtMcFloor
+    ? '> 99.9%'
+    : `${(pattern.confidence * 100).toFixed(1)}%`;
+  const pValueDisplay =
+    pattern.p_value == null
+      ? 'N/A (shape/count rule)'
+      : isAtMcFloor
+        ? '< 0.001'
+        : pattern.p_value.toFixed(4);
   const radialBins = pattern.metrics?.radial_bins ?? [];
 
   return (
@@ -58,13 +69,11 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
         <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
           <span className="text-slate-700">
             Evidence Strength:{' '}
-            <strong className="text-slate-900">{confidencePct}%</strong>
+            <strong className="text-slate-900">{confidenceDisplay}</strong>
           </span>
           <span className="text-slate-700">
             p-value:{' '}
-            <strong className="text-slate-900">
-              {pattern.p_value != null ? pattern.p_value.toFixed(4) : 'N/A (shape/count rule)'}
-            </strong>
+            <strong className="text-slate-900">{pValueDisplay}</strong>
           </span>
         </div>
       </div>

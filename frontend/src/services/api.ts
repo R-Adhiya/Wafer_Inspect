@@ -128,6 +128,7 @@ export interface AcceptedRegion {
   area_um2?: number | null;
   length_um?: number | null;
   thickness_um?: number | null;
+  contour?: [number, number][];
   reason?: string;
   original_bbox?: [number, number, number, number] | null;
   original_centroid?: [number, number] | null;
@@ -192,6 +193,28 @@ export interface InspectionRunResponse {
   pattern?: PatternResult | null;
   processing_time_s: number;
   stage_timings_ms: Record<string, number>;
+  test_filename?: string | null;
+  test_mode?: string | null;
+  reference_used?: boolean;
+  reference_filename?: string | null;
+}
+
+export type RunLifecycleStatus = 'not_started' | 'running' | 'completed' | 'failed';
+
+export interface InspectionStatusResponse {
+  upload_id: string;
+  status: RunLifecycleStatus;
+  current_stage: string;
+  completed_stages: string[];
+  stage_history: string[];
+  stages: string[];
+  error?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ApiError extends Error {
+  code?: string;
+  status?: number;
 }
 
 export interface ApiErrorDetail {
@@ -200,6 +223,33 @@ export interface ApiErrorDetail {
 }
 
 const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+/**
+ * Maps a non-OK backend HTTP response into a structured Error with optional `code` and `status`.
+ */
+export async function parseApiError(response: Response): Promise<ApiError> {
+  let errorCode: string | undefined = undefined;
+  let errorMessage = `HTTP ${response.status}: ${response.statusText || 'Request failed'}`;
+
+  try {
+    const errJson = await response.json();
+    if (errJson && errJson.detail) {
+      if (typeof errJson.detail === 'object') {
+        errorCode = errJson.detail.code;
+        errorMessage = errJson.detail.message || errorMessage;
+      } else {
+        errorMessage = String(errJson.detail);
+      }
+    }
+  } catch {
+    // Non-JSON response body fallback
+  }
+
+  const err: ApiError = new Error(errorMessage);
+  err.code = errorCode;
+  err.status = response.status;
+  return err;
+}
 
 /**
  * Fetches the health status of the backend API.
@@ -214,11 +264,10 @@ export async function getHealth(): Promise<HealthResponse> {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+    throw await parseApiError(response);
   }
 
-  const data: HealthResponse = await response.json();
-  return data;
+  return response.json();
 }
 
 /**
@@ -241,26 +290,7 @@ export async function uploadInspection(
   });
 
   if (!response.ok) {
-    let errorCode: string | undefined = undefined;
-    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-
-    try {
-      const errJson = await response.json();
-      if (errJson && errJson.detail) {
-        if (typeof errJson.detail === 'object') {
-          errorCode = errJson.detail.code;
-          errorMessage = errJson.detail.message || errorMessage;
-        } else {
-          errorMessage = String(errJson.detail);
-        }
-      }
-    } catch {
-      // JSON decode failure fallback
-    }
-
-    const err = new Error(errorMessage);
-    (err as unknown as { code?: string }).code = errorCode;
-    throw err;
+    throw await parseApiError(response);
   }
 
   return response.json();
@@ -274,7 +304,7 @@ export function getUploadImageUrl(uploadId: string, kind: 'test' | 'reference'):
 }
 
 /**
- * Executes CV preprocessing on an uploaded wafer inspection session.
+ * Executes CV inspection pipeline on an uploaded wafer session.
  */
 export async function runInspection(
   uploadId: string,
@@ -293,34 +323,50 @@ export async function runInspection(
   });
 
   if (!response.ok) {
-    let errorCode: string | undefined = undefined;
-    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-
-    try {
-      const errJson = await response.json();
-      if (errJson && errJson.detail) {
-        if (typeof errJson.detail === 'object') {
-          errorCode = errJson.detail.code;
-          errorMessage = errJson.detail.message || errorMessage;
-        } else {
-          errorMessage = String(errJson.detail);
-        }
-      }
-    } catch {
-      // JSON decode failure fallback
-    }
-
-    const err = new Error(errorMessage);
-    (err as unknown as { code?: string }).code = errorCode;
-    throw err;
+    throw await parseApiError(response);
   }
 
   return response.json();
 }
 
 /**
- * Constructs preview URL for inspection run images
- * (original, preprocessed, difference, mask, filtered_mask, bboxes, contours).
+ * Fetches persisted inspection result for a completed run (GET /inspection/run/{upload_id}/result).
+ */
+export async function getInspectionResult(uploadId: string): Promise<InspectionRunResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/result`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+
+  return response.json();
+}
+
+/**
+ * Polls live single-process stage status for an inspection run (GET /inspection/run/{upload_id}/status).
+ */
+export async function getInspectionStatus(uploadId: string): Promise<InspectionStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/status`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+
+  return response.json();
+}
+
+/**
+ * Constructs preview URL for inspection run images.
  */
 export function getRunImageUrl(uploadId: string, kind: RunImageKind): string {
   return `${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/image/${kind}`;

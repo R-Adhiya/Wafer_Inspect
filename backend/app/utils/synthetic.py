@@ -447,6 +447,17 @@ def generate_synthetic_wafer(
                 mid_y = (start[1] + end[1]) / 2.0
                 length = float(np.hypot(end[0] - start[0], end[1] - start[1]))
 
+                # Measure true rendered mask length & thickness via minAreaRect (matches pixel coverage)
+                ys_s, xs_s = np.nonzero(scratch_mask)
+                if xs_s.size >= 2:
+                    pts_s = np.column_stack((xs_s, ys_s)).astype(np.float32)
+                    (_, _), (rw_s, rh_s), _ = cv2.minAreaRect(pts_s)
+                    true_mask_length_px = round(max(float(rw_s), float(rh_s)) + 1.0, 2)
+                    true_mask_thickness_px = round(min(float(rw_s), float(rh_s)) + 1.0, 2)
+                else:
+                    true_mask_length_px = round(length, 2)
+                    true_mask_thickness_px = float(line_width)
+
                 gt_entry = {
                     "type": "scratch",
                     "center": (float(mid_x), float(mid_y)),
@@ -459,6 +470,8 @@ def generate_synthetic_wafer(
                     "true_area_visible_px": true_area_visible_px,
                     "true_length_px": round(length, 2),
                     "true_thickness_px": float(line_width),
+                    "true_mask_length_px": true_mask_length_px,
+                    "true_mask_thickness_px": true_mask_thickness_px,
                 }
                 if layout_label is not None:
                     gt_entry["layout"] = defect_layout

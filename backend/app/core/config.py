@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     MODEL_PATH: str = "models/waferinspect_model.pt"
     LOG_LEVEL: str = "INFO"
     API_BASE_URL: str = "http://localhost:8000"
-    CORS_ORIGINS: List[str] = ["http://localhost:5173"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     # Image upload and validation settings
     UPLOAD_DIR: str = "data/uploads"

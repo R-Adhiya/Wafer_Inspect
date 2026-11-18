@@ -120,8 +120,9 @@ def evaluate_cell(
         detected_count += 1
         true_area = max(1.0, float(d["true_area_visible_px"]))
         if d["type"] == "scratch":
-            true_len = float(d["true_length_px"])
-            true_thick = float(d["true_thickness_px"])
+            # Use true rendered mask minAreaRect length/thickness (Step 0a) rather than nominal cv2.line args
+            true_len = float(d.get("true_mask_length_px", d["true_length_px"]))
+            true_thick = float(d.get("true_mask_thickness_px", d["true_thickness_px"]))
         else:
             true_len = float(d["size"])
             true_thick = float(d["size"])
@@ -247,8 +248,8 @@ def write_measurement_markdown(rows: List[Dict[str, Any]], output_path: Path) ->
         "- **Shapes**: Discs of diameter `{8, 12, 16, 24}` px; scratches of length `{40, 80}` px × thickness `{2, 3, 5}` px.",
         "- **Contrasts**: `{30, 60}` gray levels, `20` seeded runs per cell.",
         "- **Refinement**: Half-maximum edge localisation (`0.5 * P`, where `P` is the mean of top 10% exact unshifted difference values inside the detection mask, local window padded 6 px, clipped to wafer mask, holes filled).",
-        "- **Ground truth**: Area relative error is measured against exact `true_area_visible_px` (clipped to wafer disk); length/thickness against true diameter (discs) or `true_length_px`/`true_thickness_px` (scratches).",
-        "- **Residual error on very thin lines (T=2-3 px)**: Default 3×3 Gaussian denoising has ~2-3 px FWHM, which laterally spreads sub-kernel-width scratches and leaves a systematic +1 to +2 px thickness overestimation (and proportional area error) even after half-max refinement.",
+        "- **Ground truth (Step 0a)**: Area relative error is measured against exact `true_area_visible_px` (clipped to wafer disk). For discs, length/thickness are compared against true diameter; for scratches, ground-truth length and thickness are computed via `cv2.minAreaRect` on the **generator's true rendered defect mask** (`true_mask_length_px`, `true_mask_thickness_px`) rather than nominal `cv2.line` parameters because OpenCV rasterises angled `cv2.line(..., thickness=T)` strokes with wider rounded pixel coverage than nominal `T`.",
+        "- **Residual error on very thin low-contrast lines (T=2 px, contrast=30)**: Default 3×3 Gaussian denoising attenuates narrow line peaks and blurs sub-kernel-width strokes, causing partial detection and larger length/area error on thin low-contrast scratches.",
         "",
         "## Full Results Table (Median / P90 Errors)",
         "",

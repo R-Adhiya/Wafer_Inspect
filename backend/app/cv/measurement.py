@@ -10,7 +10,7 @@ ORIGINAL image pixel coordinates using the Phase 3 resize scale factor:
   - areas    *= 1 / (scale_factor ** 2)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Dict, List, Literal, Optional, Tuple
 import cv2
@@ -91,6 +91,7 @@ class RegionMeasurement:
     area_um2: Optional[float] = None
     length_um: Optional[float] = None
     thickness_um: Optional[float] = None
+    contour: List[Tuple[int, int]] = field(default_factory=list)  # Simplified polygon in original image px (<= 200 pts)
 
 
 def refine_region_mask(
@@ -371,12 +372,59 @@ def build_why_flagged(
     )
 
 
+def _compute_simplified_original_contour(
+    region: Region,
+    scale_factor: float,
+    orig_image_size: Optional[Tuple[int, int]] = None,
+    epsilon_px: float = 0.75,
+    max_points: int = 200,
+) -> List[Tuple[int, int]]:
+    """Compute a simplified external contour polygon in ORIGINAL image coordinates.
+
+    Uses `cv2.approxPolyDP` with epsilon ~0.75 px (in original coordinates) and caps
+    vertex count at `max_points` (200) for fast SVG rendering in the browser.
+    """
+    src_cnt = region.contour
+    if not src_cnt:
+        return []
+
+    scaled_pts: List[List[int]] = []
+    for px, py in src_cnt:
+        ox = int(round(float(px) / scale_factor))
+        oy = int(round(float(py) / scale_factor))
+        if orig_image_size is not None:
+            max_w, max_h = int(orig_image_size[0]), int(orig_image_size[1])
+            ox = max(0, min(max_w - 1, ox))
+            oy = max(0, min(max_h - 1, oy))
+        scaled_pts.append([ox, oy])
+
+    if len(scaled_pts) <= 2:
+        return [(pt[0], pt[1]) for pt in scaled_pts]
+
+    cnt_np = np.array(scaled_pts, dtype=np.int32).reshape(-1, 1, 2)
+    approx = cv2.approxPolyDP(cnt_np, epsilon=float(epsilon_px), closed=True)
+
+    # Iteratively increase epsilon if vertex count still exceeds max_points
+    curr_eps = float(epsilon_px)
+    while approx.shape[0] > max_points and curr_eps < 50.0:
+        curr_eps *= 1.5
+        approx = cv2.approxPolyDP(cnt_np, epsilon=curr_eps, closed=True)
+
+    pts_out = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
+    if len(pts_out) > max_points:
+        indices = np.linspace(0, len(pts_out) - 1, max_points, dtype=int)
+        pts_out = [pts_out[int(i)] for i in indices]
+
+    return pts_out
+
+
 def measure_region(
     region: Region,
     noise_sigma: float,
     detected_by: DetectedByPath,
     config: Optional[MeasurementConfig] = None,
     detected_area_proc_px: Optional[int] = None,
+    orig_image_size: Optional[Tuple[int, int]] = None,
 ) -> RegionMeasurement:
     """Compute full original-pixel measurements for a single accepted defect Region.
 
@@ -434,6 +482,14 @@ def measure_region(
         length_um = round(length_px * px_um, 4)
         thickness_um = round(thickness_px * px_um, 4)
 
+    contour_orig = _compute_simplified_original_contour(
+        region=region,
+        scale_factor=scale,
+        orig_image_size=orig_image_size,
+        epsilon_px=0.75,
+        max_points=200,
+    )
+
     return RegionMeasurement(
         id=region.id,
         area_px=area_px,
@@ -458,6 +514,7 @@ def measure_region(
         area_um2=area_um2,
         length_um=length_um,
         thickness_um=thickness_um,
+        contour=contour_orig,
     )
 
 
@@ -467,6 +524,7 @@ def measure_regions(
     detected_by: DetectedByPath,
     config: Optional[MeasurementConfig] = None,
     detected_regions: Optional[List[Region]] = None,
+    orig_image_size: Optional[Tuple[int, int]] = None,
 ) -> List[RegionMeasurement]:
     """Measure all accepted defect regions in original-image pixel coordinates."""
     if config is None:
@@ -483,6 +541,7 @@ def measure_regions(
             detected_by=detected_by,
             config=config,
             detected_area_proc_px=det_area_by_id.get(r.id),
+            orig_image_size=orig_image_size,
         )
         for r in regions
     ]

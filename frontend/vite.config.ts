@@ -1,16 +1,15 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-import fs from 'fs'
+/// <reference types="vitest" />
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import fs from 'fs';
 
 if (fs.existsSync(process.cwd())) {
-  const realCwd = fs.realpathSync(process.cwd())
+  const realCwd = fs.realpathSync(process.cwd());
   if (process.cwd() !== realCwd) {
-    process.chdir(realCwd)
+    process.chdir(realCwd);
   }
 }
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -24,7 +23,13 @@ export default defineConfig({
       '/health': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-      }
-    }
-  }
-})
+      },
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.ts',
+    css: false,
+  },
+});

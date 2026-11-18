@@ -7,7 +7,7 @@ connected-component segmentation, noise filtering, and comprehensive step loggin
 from dataclasses import dataclass
 import logging
 import time
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
@@ -717,6 +717,7 @@ def run_full_pipeline(
     measurement_config: Optional[MeasurementConfig] = None,
     severity_config: Optional[SeverityConfig] = None,
     pattern_config: Optional[PatternConfig] = None,
+    on_stage: Optional[Callable[[str], None]] = None,
 ) -> FullPipelineResult:
     """Execute full classical CV inspection pipeline: preprocess -> detect -> merge -> filter -> refine -> measure -> classify -> pattern.
 
@@ -753,7 +754,12 @@ def run_full_pipeline(
     if pattern_config is None:
         pattern_config = PatternConfig()
 
+    def _report_stage(stage_name: str) -> None:
+        if on_stage is not None:
+            on_stage(stage_name)
+
     # 1. Preprocessing (reference uses the exact same PreprocessingConfig)
+    _report_stage("preprocessing")
     t0 = time.perf_counter()
     preprocessed_test, step_log = run_preprocessing(test_image, prep_config)
     scale_factor = _extract_scale_factor(step_log)
@@ -764,6 +770,7 @@ def run_full_pipeline(
     stage_timings_ms["preprocessing"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
     # 2. Classical Detection (golden, self-reference, or experimental background)
+    _report_stage("detecting")
     t0 = time.perf_counter()
     det_result = run_detection(
         test_image=preprocessed_test,
@@ -773,6 +780,7 @@ def run_full_pipeline(
     stage_timings_ms["detection"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
     # 3. Connected-Component Segmentation & Fragment Merging (BEFORE noise filtering)
+    _report_stage("segmenting")
     t0 = time.perf_counter()
     candidate_regions = segment_regions(
         morphology_mask=det_result.morphology_mask,
@@ -797,6 +805,7 @@ def run_full_pipeline(
         merge_note = "Fragment merging disabled (merge_gap_px=0)."
 
     # 4. Noise Filtering (reuses Phase 4 MAD-based noise sigma from detection stage)
+    _report_stage("filtering_noise")
     t0 = time.perf_counter()
     noise_sigma = det_result.noise_sigma
     if noise_sigma <= 0.0:
@@ -812,6 +821,7 @@ def run_full_pipeline(
     logger.info("Final defects: %d", len(filter_result.accepted_regions))
 
     # 5. Half-maximum boundary refinement (uses exact unshifted difference image)
+    _report_stage("measuring")
     detected_regions = filter_result.accepted_regions
     t0 = time.perf_counter()
     if measurement_config.refine_measurements and detected_regions:
@@ -860,12 +870,14 @@ def run_full_pipeline(
     detected_by: DetectedByPath = (
         "background" if det_result.path == "no_reference" else det_result.path
     )
+    orig_h, orig_w = test_image.shape[:2]
     measurements = measure_regions(
         regions=effective_regions,
         noise_sigma=noise_sigma,
         detected_by=detected_by,
         config=measurement_config,
         detected_regions=detected_regions,
+        orig_image_size=(orig_w, orig_h),
     )
     for m in measurements:
         m.severity = classify_defect_severity(
@@ -883,8 +895,8 @@ def run_full_pipeline(
     stage_timings_ms["measurement_and_severity"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
     # 8. Wafer-level Spatial Pattern Diagnosis (does NOT modify inspection severity)
+    _report_stage("diagnosing_pattern")
     t0 = time.perf_counter()
-    orig_h, orig_w = test_image.shape[:2]
     pattern_result = analyze_spatial_pattern(
         measurements=measurements,
         wafer_center=det_result.wafer_center,

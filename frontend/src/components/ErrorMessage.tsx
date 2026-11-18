@@ -3,10 +3,16 @@ import React from 'react';
 interface ErrorMessageProps {
   message: string;
   code?: string;
+  title?: string;
   onDismiss?: () => void;
 }
 
-export const ErrorMessage: React.FC<ErrorMessageProps> = ({ message, code, onDismiss }) => {
+export const ErrorMessage: React.FC<ErrorMessageProps> = ({
+  message,
+  code,
+  title = 'Request Error',
+  onDismiss,
+}) => {
   if (!message) return null;
 
   return (
@@ -33,7 +39,7 @@ export const ErrorMessage: React.FC<ErrorMessageProps> = ({ message, code, onDis
           </svg>
           <div>
             <p className="text-sm font-semibold text-rose-800">
-              Upload Rejected
+              {title}
             </p>
             <p className="text-xs text-rose-700 mt-1 leading-relaxed">
               {message}

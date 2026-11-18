@@ -412,6 +412,23 @@ def _run_monte_carlo_pvalues(
     }
 
 
+def _format_p_display(p_val: float, mc_trials: int) -> str:
+    """Format Monte Carlo p-value, reporting '< 0.001' when at the finite MC floor."""
+    mc_floor = 1.0 / (float(mc_trials) + 1.0)
+    if p_val <= mc_floor + 1e-6 or p_val < 0.001:
+        return "p < 0.001"
+    return f"p = {p_val:.4f}"
+
+
+def _format_conf_display(confidence: float, p_val: Optional[float], mc_trials: int) -> str:
+    """Format evidence strength percentage without claiming an impossible 100% at the MC floor."""
+    if p_val is not None:
+        mc_floor = 1.0 / (float(mc_trials) + 1.0)
+        if p_val <= mc_floor + 1e-6 or p_val < 0.001:
+            return "> 99.9%"
+    return f"{confidence * 100.0:.1f}%"
+
+
 def analyze_spatial_pattern(
     measurements: Sequence[Union[RegionMeasurement, Dict[str, Any]]],
     wafer_center: Tuple[float, float],
@@ -566,6 +583,9 @@ def analyze_spatial_pattern(
         )
 
     # Case 2: n >= min_defects -> compute full spatial statistics
+    if n in (3, 4):
+        warnings.append("low defect count: interpret with caution")
+
     edge_mask = r_norm >= config.edge_ring_r_min
     center_mask = r_norm <= config.center_cluster_r_max
     donut_mask = (r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max)
@@ -625,6 +645,8 @@ def analyze_spatial_pattern(
     )
     base_metrics["p_values"] = p_values
     base_metrics["rules_passed"] = rules_passed
+    base_metrics["mc_trials"] = int(config.mc_trials)
+    base_metrics["mc_p_floor"] = round(1.0 / (float(config.mc_trials) + 1.0), 6)
 
     # Deterministic tie-break order: SCRATCH_LINE, EDGE_RING, CENTER_CLUSTER, DONUT, LOCAL_CLUSTER
     winner: Optional[str] = None
@@ -635,6 +657,7 @@ def analyze_spatial_pattern(
 
     if winner == "SCRATCH_LINE":
         p_val = p_values["SCRATCH_LINE"]
+        p_txt = _format_p_display(p_val, config.mc_trials)
         return PatternResult(
             type="SCRATCH_LINE",
             confidence=round(1.0 - p_val, 4),
@@ -642,7 +665,7 @@ def analyze_spatial_pattern(
             explanation=(
                 f"{n} defect centroids align along a line with explained variance "
                 f"{ev * 100.0:.1f}% spanning {span_ratio * 100.0:.1f}% of the wafer diameter, "
-                f"p = {p_val:.4f}."
+                f"{p_txt}."
             ),
             metrics=base_metrics,
             supporting_defect_ids=[rec["id"] for rec in records],
@@ -651,6 +674,7 @@ def analyze_spatial_pattern(
 
     if winner == "EDGE_RING":
         p_val = p_values["EDGE_RING"]
+        p_txt = _format_p_display(p_val, config.mc_trials)
         outer_band_pct = round((1.0 - config.edge_ring_r_min) * 100.0)
         return PatternResult(
             type="EDGE_RING",
@@ -659,7 +683,7 @@ def analyze_spatial_pattern(
             explanation=(
                 f"{edge_count} of {n} defects lie in the outer {outer_band_pct}% radial band "
                 f"(random placement would put {exp_edge_frac * 100.0:.0f}% there), spread around "
-                f"the wafer (max gap {edge_gap:.0f} deg), p = {p_val:.4f}."
+                f"the wafer (max gap {edge_gap:.0f} deg), {p_txt}."
             ),
             metrics=base_metrics,
             supporting_defect_ids=[records[i]["id"] for i in range(n) if edge_mask[i]],
@@ -668,6 +692,7 @@ def analyze_spatial_pattern(
 
     if winner == "CENTER_CLUSTER":
         p_val = p_values["CENTER_CLUSTER"]
+        p_txt = _format_p_display(p_val, config.mc_trials)
         return PatternResult(
             type="CENTER_CLUSTER",
             confidence=round(1.0 - p_val, 4),
@@ -675,7 +700,7 @@ def analyze_spatial_pattern(
             explanation=(
                 f"{center_count} of {n} defects concentrate within r <= {config.center_cluster_r_max:.1f} "
                 f"of the wafer center (random placement would put {exp_center_frac * 100.0:.0f}% there), "
-                f"p = {p_val:.4f}."
+                f"{p_txt}."
             ),
             metrics=base_metrics,
             supporting_defect_ids=[records[i]["id"] for i in range(n) if center_mask[i]],
@@ -684,6 +709,7 @@ def analyze_spatial_pattern(
 
     if winner == "DONUT":
         p_val = p_values["DONUT"]
+        p_txt = _format_p_display(p_val, config.mc_trials)
         return PatternResult(
             type="DONUT",
             confidence=round(1.0 - p_val, 4),
@@ -692,7 +718,7 @@ def analyze_spatial_pattern(
                 f"{donut_count} of {n} defects lie in the mid-radius annulus "
                 f"{config.donut_r_min:.1f} <= r <= {config.donut_r_max:.1f} "
                 f"(random placement would put {exp_donut_frac * 100.0:.0f}% there), "
-                f"max angular gap {donut_gap:.0f} deg, p = {p_val:.4f}."
+                f"max angular gap {donut_gap:.0f} deg, {p_txt}."
             ),
             metrics=base_metrics,
             supporting_defect_ids=[records[i]["id"] for i in range(n) if donut_mask[i]],
@@ -701,6 +727,7 @@ def analyze_spatial_pattern(
 
     if winner == "LOCAL_CLUSTER":
         p_val = p_values["LOCAL_CLUSTER"]
+        p_txt = _format_p_display(p_val, config.mc_trials)
         return PatternResult(
             type="LOCAL_CLUSTER",
             confidence=round(1.0 - p_val, 4),
@@ -708,7 +735,7 @@ def analyze_spatial_pattern(
             explanation=(
                 f"{n} defects form a localized spatial cluster with Clark-Evans nearest-neighbour "
                 f"ratio R = {nn_ratio:.2f} (< {config.local_cluster_max_nn_ratio:.2f}), "
-                f"p = {p_val:.4f}."
+                f"{p_txt}."
             ),
             metrics=base_metrics,
             supporting_defect_ids=[rec["id"] for rec in records],
@@ -718,6 +745,7 @@ def analyze_spatial_pattern(
     # Otherwise: RANDOM_SCATTER (report closest candidate pattern and its p-value)
     closest_pattern = min(PATTERN_TIE_BREAK_ORDER, key=lambda k: p_values[k])
     closest_p = p_values[closest_pattern]
+    p_txt = _format_p_display(closest_p, config.mc_trials)
     rule_note = (
         f"passed geometric rule but did not meet p <= {config.p_value_threshold}"
         if rules_passed[closest_pattern]
@@ -729,7 +757,7 @@ def analyze_spatial_pattern(
         p_value=closest_p,
         explanation=(
             f"No spatial pattern met both geometric rules and p <= {config.p_value_threshold} across "
-            f"{n} defects (closest pattern was {closest_pattern}, p = {closest_p:.4f}, {rule_note})."
+            f"{n} defects (closest pattern was {closest_pattern}, {p_txt}, {rule_note})."
         ),
         metrics=base_metrics,
         supporting_defect_ids=[rec["id"] for rec in records],
@@ -854,8 +882,10 @@ def draw_pattern_overlay(
         )
 
     # 5. Pattern diagnosis label banner at top-left
-    p_str = f"p={pattern.p_value:.4f}" if pattern.p_value is not None else "shape/count rule"
-    banner_text = f"PATTERN: {pattern.type} ({pattern.confidence * 100.0:.1f}%, {p_str})"
+    mc_trials = int(pattern.metrics.get("mc_trials", 2000))
+    p_str = _format_p_display(pattern.p_value, mc_trials) if pattern.p_value is not None else "shape/count rule"
+    conf_str = _format_conf_display(pattern.confidence, pattern.p_value, mc_trials)
+    banner_text = f"PATTERN: {pattern.type} ({conf_str}, {p_str})"
     (tw, th), _ = cv2.getTextSize(banner_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
     cv2.rectangle(canvas, (8, 8), (min(img_w - 8, 22 + tw), 18 + th), (15, 23, 42), thickness=-1)
     cv2.putText(
