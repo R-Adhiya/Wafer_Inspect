@@ -39,10 +39,11 @@ export interface StepLogItem {
 export interface StageCount {
   stage: string;
   candidate_count: number;
+  note?: string | null;
 }
 
 export interface DetectionSummary {
-  path: 'golden' | 'no_reference';
+  path: 'golden' | 'self_reference' | 'no_reference';
   label: string;
   threshold_method: string;
   threshold_value: number;
@@ -53,6 +54,10 @@ export interface DetectionSummary {
   alignment_info: Record<string, any>;
   stage_counts: StageCount[];
   warnings: string[];
+  die_pitch?: [number, number] | null;
+  peak_strength?: number | null;
+  coverage?: number | null;
+  unverifiable_fraction?: number | null;
 }
 
 export interface AcceptedRegion {

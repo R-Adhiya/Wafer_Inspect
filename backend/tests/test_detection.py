@@ -214,8 +214,8 @@ def test_no_reference_finds_bright_and_dark_defects():
         config=DetectionConfig(threshold_method="fixed", fixed_threshold=28.0),
     )
 
-    assert result.path == "no_reference"
-    assert result.label == "Experimental no-reference detection"
+    assert result.path == "self_reference"
+    assert result.label == "Die-to-die self-reference detection (experimental)"
 
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(result.morphology_mask)
     detected_centroids = centroids[1:]
@@ -228,12 +228,11 @@ def test_no_reference_finds_bright_and_dark_defects():
 
 
 def test_no_reference_illumination_gradient_produces_zero_candidates():
-    """Verify continuous low-frequency illumination gradient alone (unpatterned wafer) produces zero false candidates."""
+    """Verify continuous low-frequency illumination gradient alone on a patterned wafer produces zero false candidates."""
     size = 512
     gradient_img, _ = generate_synthetic_wafer(
         size=size,
         seed=77,
-        grid_pitch=0,
         noise_std=8.0,
         has_gradient=True,
         gradient_strength=45.0,
@@ -251,12 +250,11 @@ def test_no_reference_illumination_gradient_produces_zero_candidates():
 
 
 def test_no_reference_wafer_edge_not_flagged():
-    """Verify wafer boundary margin prevents bevel boundary from triggering false edge defects on a clean noisy wafer."""
+    """Verify wafer boundary margin prevents bevel boundary from triggering false edge defects on a clean patterned wafer."""
     size = 512
     clean_img, _ = generate_synthetic_wafer(
         size=size,
         seed=99,
-        grid_pitch=0,
         noise_std=8.0,
         defects=None,
     )
@@ -457,8 +455,18 @@ def test_api_run_with_and_without_reference():
     run_no_ref = client.post("/inspection/run", json={"upload_id": upload_id_no_ref})
     assert run_no_ref.status_code == 200
     data_no_ref = run_no_ref.json()
-    assert data_no_ref["detection"]["path"] == "no_reference"
-    assert data_no_ref["detection"]["label"] == "Experimental no-reference detection"
+    assert data_no_ref["detection"]["path"] == "self_reference"
+    assert data_no_ref["detection"]["label"] == "Die-to-die self-reference detection (experimental)"
+
+    # Explicit background fallback mode still selects Gaussian background no-reference path
+    run_bg = client.post(
+        "/inspection/run",
+        json={"upload_id": upload_id_no_ref, "detection_config": {"no_reference_mode": "background"}},
+    )
+    assert run_bg.status_code == 200
+    data_bg = run_bg.json()
+    assert data_bg["detection"]["path"] == "no_reference"
+    assert data_bg["detection"]["label"] == "Experimental no-reference detection"
 
 
 def test_api_reference_incompatible_aspect_ratio_returns_422():

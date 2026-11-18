@@ -356,7 +356,9 @@ def test_api_phase5_regions_rejected_and_image_kinds():
     assert "stage_counts" in body
     assert len(body["regions"]) == 2
     assert body["stage_counts"][0]["stage"] == "raw_threshold"
-    assert body["stage_counts"][-1] == {"stage": "final", "candidate_count": 2}
+    assert body["stage_counts"][-1]["stage"] == "final"
+    assert body["stage_counts"][-1]["candidate_count"] == 2
+    assert body["stage_counts"][-1]["note"] is None
 
     # Check required fields on each accepted region
     for r in body["regions"]:

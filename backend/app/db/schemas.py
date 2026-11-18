@@ -72,6 +72,7 @@ class StageCount(BaseModel):
 
     stage: str
     candidate_count: int
+    note: Optional[str] = None
 
 
 class AcceptedRegionResponse(BaseModel):
@@ -113,6 +114,10 @@ class DetectionSummaryResponse(BaseModel):
     alignment_info: Dict[str, Any]
     stage_counts: List[StageCount]
     warnings: List[str]
+    die_pitch: Optional[Tuple[int, int]] = None
+    peak_strength: Optional[float] = None
+    coverage: Optional[float] = None
+    unverifiable_fraction: Optional[float] = None
 
 
 class InspectionRunResponse(BaseModel):

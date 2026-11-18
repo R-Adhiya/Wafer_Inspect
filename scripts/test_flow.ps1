@@ -112,8 +112,8 @@ try {
     Write-Host "  GET /image/invalid_kind -> HTTP $badCode (expected 400)"
     if ($badCode -ne "400") { throw "Expected 400 for invalid_kind, got $badCode" }
 
-    # 4. No-Reference Live Flow (same 4-defect wafer)
-    Write-Host "`n[Step 4] Live Flow B: Experimental No-Reference Inspection (same 4-defect wafer)..."
+    # 4. No-Reference Live Flow (same 4-defect patterned wafer -> auto selects self_reference)
+    Write-Host "`n[Step 4] Live Flow B: Patterned Wafer WITHOUT Reference (auto die-to-die self-reference)..."
     $uploadNoRef = curl.exe -s -F "test_image=@$TempTest" http://127.0.0.1:8000/inspection/upload
     $uploadNoRefJson = $uploadNoRef | ConvertFrom-Json
     $uploadIdNoRef = $uploadNoRefJson.upload_id
@@ -125,18 +125,22 @@ try {
         --data-binary "@$PayloadFile"
     $runNoRefJson = $runNoRef | ConvertFrom-Json
 
-    Write-Host "Mode: $($runNoRefJson.detection.label) | Threshold: $($runNoRefJson.detection.threshold_method) ($($runNoRefJson.detection.threshold_value))"
-    Write-Host "`n--- Stage Counts Funnel (No-Reference) ---"
-    $runNoRefJson.stage_counts | Format-Table -Property stage, candidate_count -AutoSize | Out-String | Write-Host
+    $det = $runNoRefJson.detection
+    Write-Host "Path: $($det.path) | Label: $($det.label)"
+    Write-Host "Threshold: $($det.threshold_method) ($($det.threshold_value)) | Diagnostic: $($det.threshold_reason)"
+    Write-Host "Die Pitch: ($($det.die_pitch -join ', ')) px | Peak Strength: $($det.peak_strength) | Coverage: $([math]::Round($det.coverage * 100, 2))% | Unverifiable: $([math]::Round($det.unverifiable_fraction * 100, 2))%"
 
-    Write-Host "--- Accepted Regions (No-Reference) ---"
+    Write-Host "`n--- Stage Counts Funnel (No-Reference / Self-Reference) ---"
+    $runNoRefJson.stage_counts | Format-Table -Property stage, candidate_count, note -AutoSize | Out-String | Write-Host
+
+    Write-Host "--- Accepted Regions (No-Reference / Self-Reference) ---"
     if ($runNoRefJson.regions.Count -gt 0) {
         $runNoRefJson.regions | Select-Object id, area_px, @{N='bbox';E={$_.bbox -join ','}}, @{N='centroid';E={$_.centroid -join ','}}, polarity, mean_contrast, touches_edge | Format-Table -AutoSize | Out-String | Write-Host
     } else {
         Write-Host "No defects found."
     }
 
-    Write-Host "--- Rejected Regions (No-Reference) ---"
+    Write-Host "--- Rejected Regions (No-Reference / Self-Reference) ---"
     if ($runNoRefJson.rejected_regions.Count -gt 0) {
         $runNoRefJson.rejected_regions | Format-Table -Property id, area_px, mean_contrast, reason -AutoSize | Out-String | Write-Host
     } else {

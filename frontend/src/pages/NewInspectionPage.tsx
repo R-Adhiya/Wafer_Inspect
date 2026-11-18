@@ -20,7 +20,15 @@ const IMAGE_TABS: { key: RunImageKind; label: string }[] = [
   { key: 'contours', label: 'Contours' },
 ];
 
-export const NewInspectionPage = () => {
+export interface NewInspectionPageProps {
+  initialUploadResult?: UploadInspectionResponse | null;
+  initialRunResult?: InspectionRunResponse | null;
+}
+
+export const NewInspectionPage = ({
+  initialUploadResult = null,
+  initialRunResult = null,
+}: NewInspectionPageProps = {}) => {
   const [testImage, setTestImage] = useState<File | null>(null);
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [testClientError, setTestClientError] = useState<string | null>(null);
@@ -29,12 +37,12 @@ export const NewInspectionPage = () => {
   // Upload state
   const [isUploading, setIsUploading] = useState(false);
   const [backendError, setBackendError] = useState<{ message: string; code?: string } | null>(null);
-  const [uploadResult, setUploadResult] = useState<UploadInspectionResponse | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadInspectionResponse | null>(initialUploadResult);
 
   // Pipeline Run state
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<{ message: string; code?: string } | null>(null);
-  const [runResult, setRunResult] = useState<InspectionRunResponse | null>(null);
+  const [runResult, setRunResult] = useState<InspectionRunResponse | null>(initialRunResult);
 
   // Active view tab for inspection images
   const [activeTab, setActiveTab] = useState<RunImageKind>('bboxes');
@@ -215,7 +223,7 @@ export const NewInspectionPage = () => {
                     <span>Uploading &amp; Verifying...</span>
                   </span>
                 ) : (
-                  'Upload &amp; Verify Image'
+                  'Upload & Verify Image'
                 )}
               </button>
             </div>
@@ -334,7 +342,9 @@ export const NewInspectionPage = () => {
                         className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide border ${
                           runResult.detection.path === 'golden'
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                            : 'bg-amber-50 text-amber-800 border-amber-300'
+                            : runResult.detection.path === 'self_reference'
+                              ? 'bg-indigo-50 text-indigo-800 border-indigo-300'
+                              : 'bg-amber-50 text-amber-800 border-amber-300'
                         }`}
                       >
                         {runResult.detection.label}
@@ -353,10 +363,35 @@ export const NewInspectionPage = () => {
                     <strong className="text-slate-800">Threshold Diagnostic:</strong> {runResult.detection.threshold_reason}
                   </p>
 
-                  {runResult.detection.alignment_info?.applied && (
+                  {runResult.detection.path === 'self_reference' && runResult.detection.die_pitch && (
+                    <div className="flex flex-wrap gap-4 text-xs font-mono text-indigo-900 bg-indigo-50/60 border border-indigo-100 rounded-lg px-3 py-2">
+                      <span>Die Pitch: ({runResult.detection.die_pitch[0]}, {runResult.detection.die_pitch[1]}) px</span>
+                      {runResult.detection.peak_strength != null && (
+                        <span>Peak Strength: {runResult.detection.peak_strength}</span>
+                      )}
+                      {runResult.detection.coverage != null && (
+                        <span>Coverage: {(runResult.detection.coverage * 100).toFixed(1)}%</span>
+                      )}
+                      {runResult.detection.unverifiable_fraction != null && (
+                        <span>Unverifiable Border: {(runResult.detection.unverifiable_fraction * 100).toFixed(1)}%</span>
+                      )}
+                    </div>
+                  )}
+
+                  {runResult.detection.path === 'golden' && runResult.detection.alignment_info?.applied && (
                     <p className="text-xs text-slate-600 font-mono">
                       Phase Correlation Alignment: shift=({runResult.detection.alignment_info.shift_x}, {runResult.detection.alignment_info.shift_y}) px, response={runResult.detection.alignment_info.response}
                     </p>
+                  )}
+
+                  {runResult.detection.warnings && runResult.detection.warnings.length > 0 && (
+                    <div className="space-y-1">
+                      {runResult.detection.warnings.map((w, idx) => (
+                        <p key={idx} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                          <strong>Warning:</strong> {w}
+                        </p>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
@@ -375,6 +410,7 @@ export const NewInspectionPage = () => {
                       <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold tracking-wider">
                         <th className="py-2 px-4">Inspection Stage</th>
                         <th className="py-2 px-4 text-right">Candidate Components</th>
+                        <th className="py-2 px-4">Note</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -388,6 +424,13 @@ export const NewInspectionPage = () => {
                           </td>
                           <td className="py-2.5 px-4 text-right font-mono font-semibold text-indigo-700">
                             {sc.candidate_count}
+                          </td>
+                          <td className="py-2.5 px-4 text-xs text-slate-500">
+                            {sc.note ? (
+                              <span className="text-amber-700 font-medium">{sc.note}</span>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                         </tr>
                       ))}

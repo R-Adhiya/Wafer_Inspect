@@ -46,6 +46,7 @@ from app.cv.segmentation import (
     draw_contours,
     segment_regions,
 )
+from app.cv.self_reference import build_self_reference, estimate_die_pitch
 
 logger = logging.getLogger("waferinspect.cv.pipeline")
 
@@ -57,9 +58,38 @@ class ReferenceIncompatibleError(ValueError):
 class DetectionConfig(BaseModel):
     """Configuration and parameter validation for defect detection."""
 
-    path: Literal["auto", "golden", "no_reference"] = Field(
+    path: Literal["auto", "golden", "self_reference", "no_reference"] = Field(
         default="auto",
-        description="Detection strategy: 'auto', 'golden', or 'no_reference'",
+        description="Detection strategy: 'auto', 'golden', 'self_reference', or 'no_reference'",
+    )
+    no_reference_mode: Literal["auto", "self_reference", "background"] = Field(
+        default="auto",
+        description=(
+            "Strategy when no golden reference is supplied: "
+            "'auto' (self-reference if periodic, else Gaussian background fallback), "
+            "'self_reference', or 'background'."
+        ),
+    )
+    self_ref_min_pitch: int = Field(
+        default=8,
+        ge=4,
+        description="Minimum integer die pitch in pixels for self-reference periodicity",
+    )
+    self_ref_min_peak_strength: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Minimum normalized FFT autocorrelation peak prominence for periodicity",
+    )
+    self_ref_min_neighbors: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        description="Minimum valid in-wafer neighbouring dies required per verifiable pixel",
+    )
+    self_ref_shift_tolerance: bool = Field(
+        default=True,
+        description="Use 3x3 shift-window minimum absdiff to absorb +/- 1 px pattern-edge misregistration",
     )
     edge_margin_ratio: float = Field(
         default=0.02,
@@ -374,6 +404,27 @@ def run_preprocessing(
     return current_image, step_log
 
 
+def _annotate_stage_count_notes(stage_counts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attach an honest explanatory note whenever a pipeline stage increases candidate count."""
+    annotated: List[Dict[str, Any]] = []
+    prev_count: Optional[int] = None
+    for item in stage_counts:
+        stage = str(item["stage"])
+        curr = int(item["candidate_count"])
+        note = item.get("note")
+        if prev_count is not None and curr > prev_count and not note:
+            note = (
+                f"Count increased from {prev_count} to {curr}: "
+                f"{stage} split connected regions into separate components."
+            )
+        entry: Dict[str, Any] = {"stage": stage, "candidate_count": curr}
+        if note:
+            entry["note"] = note
+        annotated.append(entry)
+        prev_count = curr
+    return annotated
+
+
 def run_detection(
     test_image: np.ndarray,
     reference_image: Optional[np.ndarray] = None,
@@ -381,8 +432,9 @@ def run_detection(
 ) -> DetectionResult:
     """Execute the configured defect detection workflow on preprocessed wafer imagery.
 
-    Supports both Golden-Image differential inspection and Experimental No-Reference
-    residual inspection.
+    Supports Golden-Image differential inspection, Die-to-Die Self-Reference inspection
+    (for periodic patterned wafers without a golden reference), and Experimental No-Reference
+    Gaussian background residual inspection.
 
     Args:
         test_image: 2D uint8 preprocessed test wafer image.
@@ -409,9 +461,16 @@ def run_detection(
     )
 
     alignment_info: Dict[str, Any] = {}
+    die_pitch: Optional[Tuple[int, int]] = None
+    peak_strength: Optional[float] = None
+    coverage: Optional[float] = None
+    unverifiable_fraction: Optional[float] = None
+    verifiable_mask: Optional[np.ndarray] = None
+    active_mask = wafer_mask
+    noise_sigma_override: Optional[float] = None
 
     if is_golden and reference_image is not None:
-        path_name: Literal["golden", "no_reference"] = "golden"
+        path_name: Literal["golden", "self_reference", "no_reference"] = "golden"
         label = "Golden Reference Inspection"
 
         ref_h, ref_w = reference_image.shape[:2]
@@ -448,28 +507,87 @@ def run_detection(
             alignment_info["photometric_matching_applied"] = photo_applied
 
         diff_image, signed_diff = compute_golden_difference(test_image, aligned_ref, wafer_mask)
+        _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
 
     else:
-        path_name = "no_reference"
-        label = "Experimental no-reference detection"
-        alignment_info = {"applied": False, "reason": "No-reference path active"}
+        # No-reference branch: resolve mode ("auto" | "self_reference" | "background")
+        effective_mode = config.no_reference_mode
+        if config.path == "self_reference":
+            effective_mode = "self_reference"
+        elif config.path == "no_reference" and effective_mode == "auto":
+            effective_mode = "background"
 
-        diff_image, signed_diff = compute_no_reference_residual(
-            test_image=test_image,
-            wafer_mask=wafer_mask,
-            background_blur_sigma_ratio=config.background_blur_sigma_ratio,
-        )
+        if effective_mode == "background":
+            path_name = "no_reference"
+            label = "Experimental no-reference detection"
+            alignment_info = {"applied": False, "reason": "Gaussian background no-reference mode active"}
+            diff_image, signed_diff = compute_no_reference_residual(
+                test_image=test_image,
+                wafer_mask=wafer_mask,
+                background_blur_sigma_ratio=config.background_blur_sigma_ratio,
+            )
+            _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
+        else:
+            pitch_est = estimate_die_pitch(
+                image=test_image,
+                wafer_mask=wafer_mask,
+                min_pitch=config.self_ref_min_pitch,
+                min_peak_strength=config.self_ref_min_peak_strength,
+            )
+            peak_strength = pitch_est.peak_strength
 
-    # 3. Thresholding with Noise Floor Guard
+            if pitch_est.periodic and pitch_est.pitch_x is not None and pitch_est.pitch_y is not None:
+                self_ref = build_self_reference(
+                    image=test_image,
+                    pitch_x=pitch_est.pitch_x,
+                    pitch_y=pitch_est.pitch_y,
+                    wafer_mask=wafer_mask,
+                    min_valid_neighbors=config.self_ref_min_neighbors,
+                    use_shift_tolerance=config.self_ref_shift_tolerance,
+                )
+                path_name = "self_reference"
+                label = "Die-to-die self-reference detection (experimental)"
+                die_pitch = (self_ref.pitch_x, self_ref.pitch_y)
+                coverage = self_ref.coverage
+                unverifiable_fraction = self_ref.unverifiable_fraction
+                verifiable_mask = self_ref.verifiable_mask
+                active_mask = self_ref.verifiable_mask
+                diff_image = self_ref.difference_image
+                signed_diff = self_ref.signed_difference
+                computed_sigma = self_ref.noise_sigma
+                noise_sigma_override = self_ref.noise_sigma
+                alignment_info = {
+                    "applied": self_ref.shift_tolerance_applied,
+                    "reason": (
+                        f"Die-to-die self-reference (pitch={die_pitch}, "
+                        f"3x3 shift tolerance={'on' if self_ref.shift_tolerance_applied else 'off'})"
+                    ),
+                }
+            else:
+                path_name = "no_reference"
+                label = "Experimental no-reference detection"
+                warnings.append(
+                    f"Self-reference fallback: {pitch_est.reason}; fell back to Gaussian background subtraction."
+                )
+                alignment_info = {"applied": False, "reason": f"Fallback to background ({pitch_est.reason})"}
+                diff_image, signed_diff = compute_no_reference_residual(
+                    test_image=test_image,
+                    wafer_mask=wafer_mask,
+                    background_blur_sigma_ratio=config.background_blur_sigma_ratio,
+                )
+                _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
+
+    # 3. Thresholding with Noise Floor Guard (strictly inside active_mask)
     raw_mask, thresh_val, thresh_reason = apply_threshold(
         diff_image=diff_image,
-        wafer_mask=wafer_mask,
+        wafer_mask=active_mask,
         method=config.threshold_method,
         fixed_threshold=config.fixed_threshold,
         adaptive_block_size=config.adaptive_block_size,
         adaptive_c=config.adaptive_c,
         min_robust_contrast=config.min_robust_contrast,
         noise_floor_k=config.noise_floor_k,
+        noise_sigma_override=noise_sigma_override,
     )
 
     raw_candidates = count_connected_candidates(raw_mask)
@@ -480,10 +598,12 @@ def run_detection(
     morph_candidates = count_connected_candidates(morph_mask)
     logger.info("Candidate regions: %d at stage 'after_morphology'", morph_candidates)
 
-    stage_counts = [
-        {"stage": "raw_threshold", "candidate_count": raw_candidates},
-        {"stage": "after_morphology", "candidate_count": morph_candidates},
-    ]
+    stage_counts = _annotate_stage_count_notes(
+        [
+            {"stage": "raw_threshold", "candidate_count": raw_candidates},
+            {"stage": "after_morphology", "candidate_count": morph_candidates},
+        ]
+    )
 
     return DetectionResult(
         path=path_name,
@@ -502,6 +622,12 @@ def run_detection(
         alignment_info=alignment_info,
         stage_counts=stage_counts,
         warnings=warnings,
+        die_pitch=die_pitch,
+        peak_strength=peak_strength,
+        coverage=coverage,
+        unverifiable_fraction=unverifiable_fraction,
+        verifiable_mask=verifiable_mask,
+        noise_sigma=round(float(computed_sigma), 4),
     )
 
 
@@ -587,8 +713,11 @@ def run_full_pipeline(
     )
     logger.info("Candidate regions: %d", len(candidate_regions))
 
-    # 4. Noise Filtering (reuses Phase 4 MAD-based noise sigma)
-    _, noise_sigma = estimate_noise_sigma(det_result.difference_image, det_result.wafer_mask)
+    # 4. Noise Filtering (reuses Phase 4 MAD-based noise sigma from detection stage)
+    noise_sigma = det_result.noise_sigma
+    if noise_sigma <= 0.0:
+        active_mask = det_result.verifiable_mask if det_result.verifiable_mask is not None else det_result.wafer_mask
+        _, noise_sigma = estimate_noise_sigma(det_result.difference_image, active_mask)
     filter_result: NoiseFilterResult = filter_regions(
         regions=candidate_regions,
         noise_sigma=noise_sigma,
@@ -603,11 +732,11 @@ def run_full_pipeline(
         accepted_regions=filter_result.accepted_regions,
     )
 
-    # 6. Build full candidate funnel stage_counts
-    # Starts with raw_threshold, after_morphology, then only rules that removed regions, then final.
-    full_stage_counts: List[Dict[str, Any]] = list(det_result.stage_counts)
-    full_stage_counts.extend(filter_result.stage_counts)
-    full_stage_counts.append({"stage": "final", "candidate_count": len(filter_result.accepted_regions)})
+    # 6. Build full candidate funnel stage_counts with honest increase notes
+    raw_funnel: List[Dict[str, Any]] = list(det_result.stage_counts)
+    raw_funnel.extend(filter_result.stage_counts)
+    raw_funnel.append({"stage": "final", "candidate_count": len(filter_result.accepted_regions)})
+    full_stage_counts = _annotate_stage_count_notes(raw_funnel)
 
     # Keep det_result.stage_counts synchronized with the full funnel
     det_result.stage_counts = full_stage_counts

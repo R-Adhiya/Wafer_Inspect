@@ -294,6 +294,10 @@ def run_inspection_pipeline(
         "alignment_info": det_result.alignment_info,
         "stage_counts": pipeline_result.stage_counts,
         "warnings": det_result.warnings,
+        "die_pitch": det_result.die_pitch,
+        "peak_strength": det_result.peak_strength,
+        "coverage": det_result.coverage,
+        "unverifiable_fraction": det_result.unverifiable_fraction,
     }
 
     # Save run.json (full config, logs, detection, and accepted/rejected regions for reproducibility)
@@ -334,6 +338,10 @@ def run_inspection_pipeline(
         alignment_info=det_result.alignment_info,
         stage_counts=stage_counts,
         warnings=det_result.warnings,
+        die_pitch=det_result.die_pitch,
+        peak_strength=det_result.peak_strength,
+        coverage=det_result.coverage,
+        unverifiable_fraction=det_result.unverifiable_fraction,
     )
 
     return InspectionRunResponse(

@@ -8,9 +8,39 @@ All data produced by this module is purely synthetic and intended solely
 for computer vision inspection and algorithm accuracy validation.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 import cv2
 import numpy as np
+
+
+def _build_synthetic_circuit_tile(
+    pitch: int,
+    substrate_intensity: float,
+    seed: Optional[int],
+) -> np.ndarray:
+    """Build a deterministic synthetic pitch x pitch circuit-like block tile.
+
+    Generates random rectangular blocks spanning a wide intensity range (60 to 210)
+    plus subtle die street border so every tiled die is identical before noise.
+    """
+    tile_rng = np.random.default_rng(seed)
+    tile = np.full((pitch, pitch), substrate_intensity, dtype=np.float32)
+
+    # Outer die street border (1 px)
+    tile[0, :] = 80.0
+    tile[:, 0] = 80.0
+
+    # Random rectangular circuit blocks spanning wide intensity range [60, 210]
+    num_blocks = max(6, pitch // 3)
+    for _ in range(num_blocks):
+        bw = int(tile_rng.integers(max(2, pitch // 10), max(3, pitch // 3)))
+        bh = int(tile_rng.integers(max(2, pitch // 10), max(3, pitch // 3)))
+        bx = int(tile_rng.integers(1, max(2, pitch - bw)))
+        by = int(tile_rng.integers(1, max(2, pitch - bh)))
+        intensity = float(tile_rng.uniform(60.0, 210.0))
+        tile[by : by + bh, bx : bx + bw] = intensity
+
+    return tile
 
 
 def generate_synthetic_wafer(
@@ -26,6 +56,8 @@ def generate_synthetic_wafer(
     has_gradient: bool = False,
     gradient_strength: float = 35.0,
     defects: Optional[List[Dict[str, Any]]] = None,
+    die_pattern: Literal["grid", "circuit"] = "grid",
+    pattern_seed: Optional[int] = None,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
     """Generate a deterministic synthetic wafer image with ground-truth defect annotations.
 
@@ -35,9 +67,9 @@ def generate_synthetic_wafer(
         wafer_radius_ratio: Ratio of wafer radius to canvas dimension.
         substrate_intensity: Nominal pixel intensity for clean wafer silicon substrate.
         background_intensity: Nominal pixel intensity for outer background chuck.
-        grid_pitch: Pitch in pixels between fabricated die grid lines.
-        grid_line_width: Width in pixels of die streets/grid lines.
-        grid_intensity: Pixel intensity along die grid streets.
+        grid_pitch: Die pitch in pixels (used for both 'grid' and 'circuit' die patterns; 0 disables pattern).
+        grid_line_width: Width in pixels of die streets/grid lines (for 'grid' pattern).
+        grid_intensity: Pixel intensity along die grid streets (for 'grid' pattern).
         noise_std: Standard deviation of additive zero-mean Gaussian sensor noise.
         has_gradient: Whether to synthesize an uneven spatial illumination gradient.
         gradient_strength: Peak-to-peak amplitude of the illumination gradient.
@@ -47,6 +79,10 @@ def generate_synthetic_wafer(
                  - "radius": float (for blobs) or "size": float
                  - "contrast": float (positive intensity delta for bright, negative for dark)
                  - for "scratch": "start": (x1, y1), "end": (x2, y2), "width": int
+        die_pattern: Repeating die pattern style:
+                     - "grid": classic periodic die street grid (default)
+                     - "circuit": seeded random multi-intensity block tile repeated at `grid_pitch`
+        pattern_seed: Optional separate RNG seed for the circuit die tile (defaults to `seed`).
 
     Returns:
         Tuple[np.ndarray, List[Dict[str, Any]]]:
@@ -65,10 +101,20 @@ def generate_synthetic_wafer(
     canvas = np.full((size, size), background_intensity, dtype=np.float32)
     canvas[wafer_mask] = substrate_intensity
 
-    # 3. Fabricated die grid texture
-    if grid_pitch > 0 and grid_line_width > 0:
-        grid_mask = ((x % grid_pitch < grid_line_width) | (y % grid_pitch < grid_line_width)) & wafer_mask
-        canvas[grid_mask] = grid_intensity
+    # 3. Fabricated periodic die pattern texture
+    if grid_pitch > 0:
+        if die_pattern == "grid":
+            if grid_line_width > 0:
+                grid_mask = ((x % grid_pitch < grid_line_width) | (y % grid_pitch < grid_line_width)) & wafer_mask
+                canvas[grid_mask] = grid_intensity
+        elif die_pattern == "circuit":
+            tile_seed = seed if pattern_seed is None else pattern_seed
+            tile = _build_synthetic_circuit_tile(grid_pitch, substrate_intensity, tile_seed)
+            reps = (size // grid_pitch) + 1
+            tiled = np.tile(tile, (reps, reps))[:size, :size]
+            canvas[wafer_mask] = tiled[wafer_mask]
+        else:
+            raise ValueError(f"Unsupported die_pattern '{die_pattern}'. Allowed: 'grid', 'circuit'")
 
     # 4. Optional spatial illumination gradient across wafer
     if has_gradient and gradient_strength > 0:
@@ -151,6 +197,8 @@ def create_standard_synthetic_pair(
     seed: int = 42,
     shift: Tuple[float, float] = (0.0, 0.0),
     defects: Optional[List[Dict[str, Any]]] = None,
+    grid_pitch: int = 32,
+    die_pattern: Literal["grid", "circuit"] = "grid",
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """Create a matching synthetic golden reference and test image pair.
 
@@ -162,6 +210,8 @@ def create_standard_synthetic_pair(
         seed: Random seed for deterministic reproducibility.
         shift: (dx, dy) translation shift to apply to the test image.
         defects: List of synthetic defects injected into the test image.
+        grid_pitch: Die pitch in pixels (default 32).
+        die_pattern: Repeating die pattern style ("grid" or "circuit").
 
     Returns:
         Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
@@ -171,16 +221,22 @@ def create_standard_synthetic_pair(
     reference_image, _ = generate_synthetic_wafer(
         size=size,
         seed=seed,
+        grid_pitch=grid_pitch,
         has_gradient=False,
         defects=None,
+        die_pattern=die_pattern,
+        pattern_seed=seed,
     )
 
-    # Test image with defects
+    # Test image with defects (same pattern layout, independent noise realization)
     test_image, ground_truth = generate_synthetic_wafer(
         size=size,
-        seed=seed + 1,  # different noise realization
+        seed=seed + 1,
+        grid_pitch=grid_pitch,
         has_gradient=False,
         defects=defects,
+        die_pattern=die_pattern,
+        pattern_seed=seed,
     )
 
     # Apply translation if requested

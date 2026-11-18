@@ -22,7 +22,7 @@ logger = logging.getLogger("waferinspect.cv.detection")
 class DetectionResult:
     """Encapsulates the complete defect detection output and candidate diagnostics."""
 
-    path: Literal["golden", "no_reference"]
+    path: Literal["golden", "self_reference", "no_reference"]
     label: str
     threshold_method: str
     threshold_value: float
@@ -38,6 +38,12 @@ class DetectionResult:
     alignment_info: Dict[str, Any] = field(default_factory=dict)
     stage_counts: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    die_pitch: Optional[Tuple[int, int]] = None
+    peak_strength: Optional[float] = None
+    coverage: Optional[float] = None
+    unverifiable_fraction: Optional[float] = None
+    verifiable_mask: Optional[np.ndarray] = None
+    noise_sigma: float = 0.0
 
 
 def estimate_wafer_mask(
@@ -312,6 +318,7 @@ def apply_threshold(
     adaptive_c: float = 5.0,
     min_robust_contrast: float = 8.0,
     noise_floor_k: float = 3.5,
+    noise_sigma_override: Optional[float] = None,
 ) -> Tuple[np.ndarray, float, str]:
     """Threshold a difference image into a binary candidate defect mask with noise-floor guard.
 
@@ -335,6 +342,8 @@ def apply_threshold(
         adaptive_c: Subtracted constant for "adaptive" method.
         min_robust_contrast: Minimum 99.9th-percentile contrast required to run Otsu.
         noise_floor_k: Statistical sigma multiplier k for deriving the noise ceiling.
+        noise_sigma_override: Optional pre-computed MAD noise sigma (e.g. unshifted self-reference
+                              sigma so 3x3 shift-tolerance min does not deflate noise estimate).
 
     Returns:
         Tuple containing:
@@ -347,7 +356,10 @@ def apply_threshold(
         return np.zeros_like(diff_image), 0.0, "Empty wafer mask"
 
     # Robust noise standard deviation via Median Absolute Deviation (MAD)
-    med_val, sigma_diff = estimate_noise_sigma(diff_image, wafer_mask)
+    if noise_sigma_override is not None:
+        sigma_diff = max(0.0, float(noise_sigma_override))
+    else:
+        _, sigma_diff = estimate_noise_sigma(diff_image, wafer_mask)
 
     # Folded-normal statistical noise ceiling centered at 0: T_noise = k * sigma_diff
     noise_ceiling = noise_floor_k * sigma_diff

@@ -20,7 +20,7 @@ export const Navbar: React.FC = () => {
 
         <div className="flex items-center space-x-3">
           <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 rounded-full">
-            Phase 2: Upload &amp; Preview
+            CV Inspection Pipeline
           </span>
         </div>
       </div>
