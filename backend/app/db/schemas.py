@@ -44,6 +44,14 @@ class InspectionRunRequest(BaseModel):
         default=None,
         description="Optional overrides for NoiseFilterConfig",
     )
+    measurement_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional overrides for MeasurementConfig (e.g. pixel_size_um)",
+    )
+    severity_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional overrides for SeverityConfig",
+    )
 
 
 class ImageStats(BaseModel):
@@ -76,19 +84,55 @@ class StageCount(BaseModel):
 
 
 class AcceptedRegionResponse(BaseModel):
-    """Accepted defect region metadata returned by POST /inspection/run."""
+    """Accepted defect region metadata and original-pixel measurements returned by POST /inspection/run."""
 
     id: int
     bbox: Tuple[int, int, int, int]
+    width_px: int = 0
+    height_px: int = 0
     area_px: int
     centroid: Tuple[float, float]
+    perimeter_px: float = 0.0
+    equivalent_diameter_px: float = 0.0
+    length_px: float = 0.0
+    thickness_px: float = 0.0
+    angle_deg: float = 0.0
+    elongation: float = 1.0
     polarity: Literal["bright", "dark"]
     mean_contrast: float
     peak_contrast: float
+    contrast_to_noise: float = 0.0
     touches_edge: bool
+    detected_by: Literal["golden", "self_reference", "background"] = "golden"
+    why_flagged: str = ""
+    severity: Literal["LOW", "MEDIUM", "HIGH"] = "LOW"
+    area_um2: Optional[float] = None
+    length_um: Optional[float] = None
+    thickness_um: Optional[float] = None
     reason: str = ""
     original_bbox: Optional[Tuple[int, int, int, int]] = None
     original_centroid: Optional[Tuple[float, float]] = None
+
+
+class InspectionSummaryResponse(BaseModel):
+    """Aggregated defect counts, area statistics, prototype severity, and calibration status."""
+
+    defect_count: int
+    total_defect_area_px: int
+    largest_defect_area_px: int
+    average_defect_area_px: float
+    severity: Literal["NONE", "LOW", "MEDIUM", "HIGH"]
+    severity_reason: str
+    calibration_status: str
+    pixel_size_um: Optional[float] = None
+
+
+class ModelInfoResponse(BaseModel):
+    """Single-source-of-truth inspection algorithm metadata."""
+
+    name: str
+    version: str
+    detection_method: str
 
 
 class RejectedRegionResponse(BaseModel):
@@ -134,7 +178,12 @@ class InspectionRunResponse(BaseModel):
     filtered_mask_image_url: Optional[str] = None
     bboxes_image_url: Optional[str] = None
     contours_image_url: Optional[str] = None
+    final_overlay_image_url: Optional[str] = None
     detection: Optional[DetectionSummaryResponse] = None
     stage_counts: List[StageCount] = Field(default_factory=list)
     regions: List[AcceptedRegionResponse] = Field(default_factory=list)
     rejected_regions: List[RejectedRegionResponse] = Field(default_factory=list)
+    summary: Optional[InspectionSummaryResponse] = None
+    model: Optional[ModelInfoResponse] = None
+    processing_time_s: float = 0.0
+    stage_timings_ms: Dict[str, float] = Field(default_factory=dict)

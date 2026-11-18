@@ -11,6 +11,7 @@ from PIL import Image
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.cv.measurement import MeasurementConfig
 from app.cv.noise_filter import NoiseFilterConfig
 from app.cv.pipeline import (
     DetectionConfig,
@@ -18,11 +19,14 @@ from app.cv.pipeline import (
     ReferenceIncompatibleError,
     run_full_pipeline,
 )
+from app.cv.severity import SeverityConfig
 from app.db.schemas import (
     AcceptedRegionResponse,
     DetectionSummaryResponse,
     ImageStats,
     InspectionRunResponse,
+    InspectionSummaryResponse,
+    ModelInfoResponse,
     RejectedRegionResponse,
     StageCount,
     StepLogItem,
@@ -36,6 +40,7 @@ ALLOWED_RUN_IMAGE_KINDS = {
     "filtered_mask",
     "bboxes",
     "contours",
+    "final_overlay",
 }
 
 RESULT_PNG_MAP = {
@@ -45,6 +50,7 @@ RESULT_PNG_MAP = {
     "filtered_mask": "filtered_mask.png",
     "bboxes": "bboxes.png",
     "contours": "contours.png",
+    "final_overlay": "final_overlay.png",
 }
 
 MIME_TYPE_MAP = {
@@ -62,6 +68,8 @@ def run_inspection_pipeline(
     preprocessing_overrides: Optional[Dict[str, Any]] = None,
     detection_overrides: Optional[Dict[str, Any]] = None,
     noise_filter_overrides: Optional[Dict[str, Any]] = None,
+    measurement_overrides: Optional[Dict[str, Any]] = None,
+    severity_overrides: Optional[Dict[str, Any]] = None,
 ) -> InspectionRunResponse:
     """Load uploaded wafer images, execute full CV pipeline, and store run artifacts.
 
@@ -200,7 +208,27 @@ def run_inspection_pipeline(
             detail={"code": "INVALID_CONFIG", "message": f"Invalid noise filter configuration: {str(exc)}"},
         )
 
-    # 6. Execute full CV pipeline (preprocess -> detect -> segment -> filter -> render overlays)
+    try:
+        measurement_config = (
+            MeasurementConfig(**measurement_overrides) if measurement_overrides else MeasurementConfig()
+        )
+    except Exception as exc:
+        logger.warning("Invalid measurement config for upload '%s': %s", clean_uuid, str(exc))
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_CONFIG", "message": f"Invalid measurement configuration: {str(exc)}"},
+        )
+
+    try:
+        severity_config = SeverityConfig(**severity_overrides) if severity_overrides else SeverityConfig()
+    except Exception as exc:
+        logger.warning("Invalid severity config for upload '%s': %s", clean_uuid, str(exc))
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_CONFIG", "message": f"Invalid severity configuration: {str(exc)}"},
+        )
+
+    # 6. Execute full CV pipeline (preprocess -> detect -> merge -> filter -> measure -> classify -> overlays)
     logger.info("Executing full inspection pipeline for upload_id=%s (has_reference=%s)", clean_uuid, ref_array is not None)
     try:
         pipeline_result = run_full_pipeline(
@@ -209,6 +237,8 @@ def run_inspection_pipeline(
             prep_config=prep_config,
             det_config=det_config,
             filter_config=filter_config,
+            measurement_config=measurement_config,
+            severity_config=severity_config,
         )
     except ReferenceIncompatibleError as exc:
         raise HTTPException(
@@ -239,24 +269,41 @@ def run_inspection_pipeline(
     Image.fromarray(pipeline_result.filtered_mask).save(results_dir / "filtered_mask.png", format="PNG")
     Image.fromarray(pipeline_result.bboxes_image).save(results_dir / "bboxes.png", format="PNG")
     Image.fromarray(pipeline_result.contours_image).save(results_dir / "contours.png", format="PNG")
+    Image.fromarray(pipeline_result.final_overlay_image).save(results_dir / "final_overlay.png", format="PNG")
 
-    # Serialize accepted and rejected regions
+    # Serialize accepted regions with full original-pixel measurements and severity
+    regions_by_id = {r.id: r for r in pipeline_result.accepted_regions}
     accepted_responses = []
     accepted_json_records = []
-    for r in pipeline_result.accepted_regions:
-        orig_bbox, orig_centroid = r.original_bbox_and_centroid()
+    for m in pipeline_result.measurements:
+        src_region = regions_by_id.get(m.id)
         item = AcceptedRegionResponse(
-            id=r.id,
-            bbox=r.bbox,
-            area_px=r.area_px,
-            centroid=r.centroid,
-            polarity=r.polarity,
-            mean_contrast=r.mean_contrast,
-            peak_contrast=r.peak_contrast,
-            touches_edge=r.touches_edge,
-            reason=r.decision_reason,
-            original_bbox=orig_bbox,
-            original_centroid=orig_centroid,
+            id=m.id,
+            bbox=m.bbox,
+            width_px=m.width_px,
+            height_px=m.height_px,
+            area_px=m.area_px,
+            centroid=m.centroid,
+            perimeter_px=m.perimeter_px,
+            equivalent_diameter_px=m.equivalent_diameter_px,
+            length_px=m.length_px,
+            thickness_px=m.thickness_px,
+            angle_deg=m.angle_deg,
+            elongation=m.elongation,
+            polarity=m.polarity,
+            mean_contrast=m.mean_contrast,
+            peak_contrast=m.peak_contrast,
+            contrast_to_noise=m.contrast_to_noise,
+            touches_edge=m.touches_edge,
+            detected_by=m.detected_by,
+            why_flagged=m.why_flagged,
+            severity=m.severity,
+            area_um2=m.area_um2,
+            length_um=m.length_um,
+            thickness_um=m.thickness_um,
+            reason=src_region.decision_reason if src_region else "",
+            original_bbox=m.bbox,
+            original_centroid=m.centroid,
         )
         accepted_responses.append(item)
         accepted_json_records.append(item.model_dump())
@@ -300,7 +347,7 @@ def run_inspection_pipeline(
         "unverifiable_fraction": det_result.unverifiable_fraction,
     }
 
-    # Save run.json (full config, logs, detection, and accepted/rejected regions for reproducibility)
+    # Save run.json (full config, logs, detection, summary, model, timings, and measurements)
     run_meta = {
         "upload_id": clean_uuid,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -308,6 +355,8 @@ def run_inspection_pipeline(
         "preprocessing_config": prep_config.model_dump(),
         "detection_config": det_config.model_dump(),
         "noise_filter_config": filter_config.model_dump(),
+        "measurement_config": measurement_config.model_dump(),
+        "severity_config": severity_config.model_dump(),
         "noise_sigma": pipeline_result.noise_sigma,
         "derived_min_mean_contrast": pipeline_result.derived_min_mean_contrast,
         "original_stats": original_stats.model_dump(),
@@ -315,6 +364,10 @@ def run_inspection_pipeline(
         "step_log": pipeline_result.step_log,
         "detection": detection_summary,
         "stage_counts": pipeline_result.stage_counts,
+        "summary": pipeline_result.summary,
+        "model": pipeline_result.model,
+        "processing_time_s": pipeline_result.processing_time_s,
+        "stage_timings_ms": pipeline_result.stage_timings_ms,
         "regions": accepted_json_records,
         "rejected_regions": rejected_json_records,
     }
@@ -325,6 +378,8 @@ def run_inspection_pipeline(
 
     step_log_items = [StepLogItem(**step) for step in pipeline_result.step_log]
     stage_counts = [StageCount(**sc) for sc in pipeline_result.stage_counts]
+    summary_response = InspectionSummaryResponse(**pipeline_result.summary)
+    model_response = ModelInfoResponse(**pipeline_result.model)
 
     det_response = DetectionSummaryResponse(
         path=det_result.path,
@@ -356,10 +411,15 @@ def run_inspection_pipeline(
         filtered_mask_image_url=f"/inspection/run/{clean_uuid}/image/filtered_mask",
         bboxes_image_url=f"/inspection/run/{clean_uuid}/image/bboxes",
         contours_image_url=f"/inspection/run/{clean_uuid}/image/contours",
+        final_overlay_image_url=f"/inspection/run/{clean_uuid}/image/final_overlay",
         detection=det_response,
         stage_counts=stage_counts,
         regions=accepted_responses,
         rejected_regions=rejected_responses,
+        summary=summary_response,
+        model=model_response,
+        processing_time_s=pipeline_result.processing_time_s,
+        stage_timings_ms=pipeline_result.stage_timings_ms,
     )
 
 

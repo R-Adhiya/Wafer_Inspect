@@ -47,13 +47,15 @@ def get_uploaded_image(
 def run_inspection(
     payload: InspectionRunRequest,
 ) -> InspectionRunResponse:
-    """Execute preprocessing, detection, segmentation, and noise filtering pipeline."""
+    """Execute preprocessing, detection, segmentation, filtering, measurement, and severity pipeline."""
     return run_inspection_pipeline(
         upload_id=payload.upload_id,
         config_overrides=payload.config,
         preprocessing_overrides=payload.preprocessing_config,
         detection_overrides=payload.detection_config,
         noise_filter_overrides=payload.noise_filter_config,
+        measurement_overrides=payload.measurement_config,
+        severity_overrides=payload.severity_config,
     )
 
 

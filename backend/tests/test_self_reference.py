@@ -145,46 +145,96 @@ def test_self_reference_finds_four_defects_in_both_patterns(die_pattern: str):
         min_dist = min(np.hypot(cx - gx, cy - gy) for cx, cy in exact_centroids)
         assert min_dist <= 12.0
 
-    # B. Default 3x3 shift tolerance: all 4 defects found and every accepted region belongs to a real defect
+    # B. Default config (shift_tolerance=True, merge_gap_px=3): fragment merging reunites the
+    #    scratch crossing die streets into ONE single region -> strictly 4 regions matching all 4 GT defects
     res_tol = run_full_pipeline(
         test_image=img,
         reference_image=None,
-        det_config=DetectionConfig(no_reference_mode="auto", self_ref_shift_tolerance=True),
+        det_config=DetectionConfig(),
         filter_config=NoiseFilterConfig(),
     )
     assert res_tol.detection.path == "self_reference"
     assert res_tol.detection.die_pitch == (32, 32)
-    assert len(res_tol.accepted_regions) >= 4
+    assert len(res_tol.accepted_regions) == 4, (
+        f"{die_pattern}: expected strictly 4 merged regions under default config, "
+        f"got {len(res_tol.accepted_regions)}: {[(r.id, r.area_px, r.centroid) for r in res_tol.accepted_regions]}"
+    )
 
+    # Verify the after_fragment_merge stage is present in the funnel
+    funnel_stages = [sc["stage"] for sc in res_tol.stage_counts]
+    assert "after_fragment_merge" in funnel_stages
+
+    # Every ground-truth defect must match a unique accepted region (1-to-1)
+    matched_region_ids = set()
     for d in gt:
-        if d["type"] == "scratch":
-            sx, sy = d["start"]
-            ex, ey = d["end"]
-            min_dist = min(
-                _point_to_segment_distance(r.centroid[0], r.centroid[1], sx, sy, ex, ey)
-                for r in res_tol.accepted_regions
-            )
-            assert min_dist <= 8.0, f"{die_pattern}: scratch not matched (min_dist={min_dist:.1f})"
-        else:
-            gx, gy = d["center"]
-            min_dist = min(np.hypot(r.centroid[0] - gx, r.centroid[1] - gy) for r in res_tol.accepted_regions)
-            assert min_dist <= 12.0, f"{die_pattern}: blob at ({gx}, {gy}) not matched (min_dist={min_dist:.1f})"
+        gx, gy = d["center"]
+        best_region = min(
+            res_tol.accepted_regions,
+            key=lambda r: float(np.hypot(r.centroid[0] - gx, r.centroid[1] - gy)),
+        )
+        dist = float(np.hypot(best_region.centroid[0] - gx, best_region.centroid[1] - gy))
+        assert dist <= 12.0, (
+            f"{die_pattern}: GT defect {d['type']} at ({gx}, {gy}) not matched within 12 px "
+            f"(nearest region #{best_region.id} at {best_region.centroid}, dist={dist:.1f})"
+        )
+        matched_region_ids.add(best_region.id)
 
-    # Every accepted region must belong to one of the 4 injected defects (0 false positives elsewhere)
-    for r in res_tol.accepted_regions:
-        rx, ry = r.centroid
-        matched_any = False
-        for d in gt:
-            if d["type"] == "scratch":
-                sx, sy = d["start"]
-                ex, ey = d["end"]
-                if _point_to_segment_distance(rx, ry, sx, sy, ex, ey) <= 10.0:
-                    matched_any = True
-            else:
-                gx, gy = d["center"]
-                if np.hypot(rx - gx, ry - gy) <= 12.0:
-                    matched_any = True
-        assert matched_any, f"{die_pattern}: unexpected false positive region at ({rx}, {ry})"
+    assert len(matched_region_ids) == 4
+
+
+def test_fragment_merge_separates_20px_merges_2px_and_preserves_true_area():
+    """Verify fragments 2 px apart merge with exact pixel sum, while defects 20 px apart stay separate."""
+    from app.cv.segmentation import segment_regions
+
+    mask = np.zeros((160, 220), dtype=np.uint8)
+    signed = np.zeros((160, 220), dtype=np.int16)
+
+    # 1. Scratch split into three segments separated by 2-px gaps (simulate die-street crossings)
+    # Segment A: y=40..42, x=20..49 -> 3 * 30 = 90 px
+    # Gap:       x=50..51 (2 px gap)
+    # Segment B: y=40..42, x=52..81 -> 3 * 30 = 90 px
+    # Gap:       x=82..83 (2 px gap)
+    # Segment C: y=40..42, x=84..113 -> 3 * 30 = 90 px
+    mask[40:43, 20:50] = 255
+    mask[40:43, 52:82] = 255
+    mask[40:43, 84:114] = 255
+    signed[40:43, 20:50] = 65
+    signed[40:43, 52:82] = 65
+    signed[40:43, 84:114] = 65
+
+    # 2. Two distinct defects 20 px apart (must NOT merge under merge_gap_px=3)
+    # Defect 1: y=100..111, x=40..51 -> 12 * 12 = 144 px
+    # Gap:      x=52..71 (20 px gap)
+    # Defect 2: y=100..111, x=72..83 -> 12 * 12 = 144 px
+    mask[100:112, 40:52] = 255
+    mask[100:112, 72:84] = 255
+    signed[100:112, 40:52] = 60
+    signed[100:112, 72:84] = -60
+
+    full_wafer = np.full(mask.shape, 255, dtype=np.uint8)
+
+    # Without merging: 3 scratch fragments + 2 separate blobs = 5 components
+    unmerged = segment_regions(mask, signed, wafer_mask=full_wafer, merge_gap_px=0)
+    assert len(unmerged) == 5
+    fragment_area_sum = sum(r.area_px for r in unmerged if r.centroid[1] < 60.0)
+    assert fragment_area_sum == 270
+
+    # With default merge_gap_px=3: the 3 scratch fragments (2 px apart) merge into 1,
+    # while the 2 defects 20 px apart remain 2 distinct regions -> total 3 regions
+    merged = segment_regions(mask, signed, wafer_mask=full_wafer, merge_gap_px=3)
+    assert len(merged) == 3
+
+    scratch_regions = [r for r in merged if r.centroid[1] < 60.0]
+    separate_regions = [r for r in merged if r.centroid[1] >= 60.0]
+
+    assert len(scratch_regions) == 1
+    assert len(separate_regions) == 2
+
+    # Merged scratch area_px MUST equal the true sum of its original fragment pixels (within 1 px; exact here)
+    assert abs(scratch_regions[0].area_px - fragment_area_sum) <= 1
+    assert scratch_regions[0].area_px == 270
+    # Bounding box spans the full merged scratch (x=20..113 -> width=94)
+    assert scratch_regions[0].bbox == (20, 40, 94, 3)
 
 
 # ---------------------------------------------------------------------------

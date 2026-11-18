@@ -6,8 +6,11 @@ pair with 4 injected synthetic defects (bright blob, dark blob, scratch, rim def
 All data produced is purely synthetic for inspection validation.
 """
 
+import json
+import math
 from pathlib import Path
 import sys
+from typing import Optional
 from PIL import Image
 
 # Ensure backend root is on sys.path
@@ -40,7 +43,12 @@ def generate_noisy_wafer(output_path: str = "noisy_wafer.png", size: int = 512) 
     )
 
 
-def generate_four_defect_pair(ref_path: str, test_path: str, size: int = 512) -> None:
+def generate_four_defect_pair(
+    ref_path: str,
+    test_path: str,
+    size: int = 512,
+    gt_path: Optional[str] = None,
+) -> None:
     """Generate a synthetic golden reference and test wafer pair with 4 injected defects."""
     defects = [
         {"type": "bright_blob", "center": (165.0, 175.0), "radius": 8.0, "contrast": 60.0},
@@ -51,6 +59,28 @@ def generate_four_defect_pair(ref_path: str, test_path: str, size: int = 512) ->
     ref_img, test_img, gt = create_standard_synthetic_pair(size=size, seed=42, defects=defects)
     Image.fromarray(ref_img, mode="L").save(ref_path)
     Image.fromarray(test_img, mode="L").save(test_path)
+
+    if gt_path:
+        enriched_gt = []
+        for idx, d in enumerate(gt, start=1):
+            item = dict(d)
+            item["gt_id"] = idx
+            if d["type"] == "scratch":
+                sx, sy = d["start"]
+                ex, ey = d["end"]
+                length = float(math.hypot(ex - sx, ey - sy))
+                angle = float(math.degrees(math.atan2(ey - sy, ex - sx)) % 180.0)
+                item["true_length_px"] = round(length, 2)
+                item["true_thickness_px"] = float(d["width"])
+                item["true_angle_deg"] = round(angle, 2)
+                item["true_area_px"] = round(length * float(d["width"]), 1)
+            else:
+                r = float(d["radius"])
+                item["true_diameter_px"] = round(2.0 * r, 2)
+                item["true_area_px"] = round(math.pi * r * r, 1)
+            enriched_gt.append(item)
+        Path(gt_path).write_text(json.dumps(enriched_gt, indent=2), encoding="utf-8")
+
     print(
         f"Generated synthetic reference '{ref_path}' and 4-defect test wafer '{test_path}' "
         f"({len(gt)} ground-truth defects)."
@@ -59,7 +89,8 @@ def generate_four_defect_pair(ref_path: str, test_path: str, size: int = 512) ->
 
 if __name__ == "__main__":
     if len(sys.argv) >= 4 and sys.argv[1] == "--pair":
-        generate_four_defect_pair(sys.argv[2], sys.argv[3])
+        gt_out = sys.argv[5] if len(sys.argv) >= 6 and sys.argv[4] == "--gt" else None
+        generate_four_defect_pair(sys.argv[2], sys.argv[3], gt_path=gt_out)
     else:
         out_file = sys.argv[1] if len(sys.argv) > 1 else "noisy_wafer.png"
         generate_noisy_wafer(out_file)

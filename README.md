@@ -13,6 +13,12 @@ When no golden reference wafer is supplied, WaferInspect runs in `no_reference_m
 - **Regular periodic pattern & integer pitch only**: Assumes a uniform rectangular die array with integer pixel pitch `(pitch_x, pitch_y)`. Non-integer/fractional pitches or rotational skew are not resampled; instead, an optional 3×3 shift-tolerance window (enabled by default) absorbs up to ±1 px misregistration at pattern edges at the trade-off of slightly reduced sensitivity to thin features parallel to or crossing high-contrast pattern edges.
 - **Unverifiable border band**: Pixels with fewer than 3 valid in-wafer neighbouring dies are marked unverifiable and explicitly excluded from detection rather than guessed. Both verifiable `coverage` and `unverifiable_fraction` are reported in the detection summary and API response.
 
+## Evaluation Limits
+
+- **Synthetic evaluation only**: All detection, segmentation, fragment-merging, and measurement algorithms were developed and evaluated on a deterministic synthetic wafer generator (`backend/app/utils/synthetic.py`) with exactly periodic dies and integer pixel pitch. See [`docs/accuracy.md`](docs/accuracy.md) for the full 1,800-image benchmark table.
+- **Real wafer images untested**: Performance on real brightfield/darkfield optical or SEM fab wafer imagery (with non-integer die pitch, optical distortion, lens vignetting, or wafer-edge bevel glare) has not been tested.
+- **Uncalibrated prototype**: Measurements are reported in uncalibrated original image pixels unless the user explicitly provides `pixel_size_um`, and severity tiers (`NONE`/`LOW`/`MEDIUM`/`HIGH`) are a documented prototype heuristic rather than an industrial fab standard.
+
 ## Scripts & Utilities
 
 - `scripts/generate_noisy_wafer.py`: Generates synthetic wafer test images (512x512 grayscale) via `backend/app/utils/synthetic.py`, simulating silicon wafer substrate disks, die grids or circuit block tiles, additive Gaussian sensor noise, and illumination gradients.

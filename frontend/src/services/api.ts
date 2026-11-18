@@ -60,15 +60,33 @@ export interface DetectionSummary {
   unverifiable_fraction?: number | null;
 }
 
+export type DefectSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
+export type InspectionSeverity = 'NONE' | DefectSeverity;
+
 export interface AcceptedRegion {
   id: number;
   bbox: [number, number, number, number];
+  width_px: number;
+  height_px: number;
   area_px: number;
   centroid: [number, number];
+  perimeter_px: number;
+  equivalent_diameter_px: number;
+  length_px: number;
+  thickness_px: number;
+  angle_deg: number;
+  elongation: number;
   polarity: 'bright' | 'dark';
   mean_contrast: number;
   peak_contrast: number;
+  contrast_to_noise: number;
   touches_edge: boolean;
+  detected_by: 'golden' | 'self_reference' | 'background';
+  why_flagged: string;
+  severity: DefectSeverity;
+  area_um2?: number | null;
+  length_um?: number | null;
+  thickness_um?: number | null;
   reason?: string;
   original_bbox?: [number, number, number, number] | null;
   original_centroid?: [number, number] | null;
@@ -81,6 +99,23 @@ export interface RejectedRegion {
   reason: string;
 }
 
+export interface InspectionSummary {
+  defect_count: number;
+  total_defect_area_px: number;
+  largest_defect_area_px: number;
+  average_defect_area_px: number;
+  severity: InspectionSeverity;
+  severity_reason: string;
+  calibration_status: string;
+  pixel_size_um?: number | null;
+}
+
+export interface ModelInfo {
+  name: string;
+  version: string;
+  detection_method: string;
+}
+
 export type RunImageKind =
   | 'original'
   | 'preprocessed'
@@ -88,7 +123,8 @@ export type RunImageKind =
   | 'mask'
   | 'filtered_mask'
   | 'bboxes'
-  | 'contours';
+  | 'contours'
+  | 'final_overlay';
 
 export interface InspectionRunResponse {
   upload_id: string;
@@ -102,10 +138,15 @@ export interface InspectionRunResponse {
   filtered_mask_image_url?: string | null;
   bboxes_image_url?: string | null;
   contours_image_url?: string | null;
+  final_overlay_image_url?: string | null;
   detection?: DetectionSummary | null;
   stage_counts: StageCount[];
   regions: AcceptedRegion[];
   rejected_regions: RejectedRegion[];
+  summary?: InspectionSummary | null;
+  model?: ModelInfo | null;
+  processing_time_s: number;
+  stage_timings_ms: Record<string, number>;
 }
 
 export interface ApiErrorDetail {

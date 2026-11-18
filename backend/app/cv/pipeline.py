@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.config import DETECTION_METHOD_LABEL, MODEL_NAME, MODEL_VERSION
 from app.cv.detection import (
     DetectionResult,
     align_reference,
@@ -23,6 +24,13 @@ from app.cv.detection import (
     estimate_noise_sigma,
     estimate_wafer_mask,
     match_photometry,
+)
+from app.cv.measurement import (
+    DetectedByPath,
+    MeasurementConfig,
+    RegionMeasurement,
+    format_calibration_status,
+    measure_regions,
 )
 from app.cv.noise_filter import (
     NoiseFilterConfig,
@@ -44,9 +52,15 @@ from app.cv.segmentation import (
     build_filtered_mask_and_labels,
     draw_bounding_boxes,
     draw_contours,
+    draw_final_overlay,
     segment_regions,
 )
 from app.cv.self_reference import build_self_reference, estimate_die_pitch
+from app.cv.severity import (
+    SeverityConfig,
+    assess_inspection_severity,
+    classify_defect_severity,
+)
 
 logger = logging.getLogger("waferinspect.cv.pipeline")
 
@@ -149,6 +163,15 @@ class DetectionConfig(BaseModel):
     morphology_ops: List[Tuple[str, int]] = Field(
         default_factory=lambda: [("open", 3), ("close", 3)],
         description="Ordered sequence of (op_name, kernel_size) morphology operations",
+    )
+    merge_gap_px: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Elliptical radius in pixels for grouping nearby defect fragments "
+            "(e.g. a scratch split across periodic die streets) before noise filtering; "
+            "0 disables fragment merging."
+        ),
     )
 
     @field_validator("adaptive_block_size")
@@ -633,7 +656,7 @@ def run_detection(
 
 @dataclass
 class FullPipelineResult:
-    """Complete end-to-end result of preprocessing, detection, segmentation, and noise filtering."""
+    """Complete end-to-end result of preprocessing, detection, segmentation, filtering, measurement, and severity."""
 
     preprocessed_test: np.ndarray
     step_log: List[Dict[str, Any]]
@@ -641,13 +664,19 @@ class FullPipelineResult:
     detection: DetectionResult
     accepted_regions: List[Region]
     rejected_regions: List[RejectedRegion]
+    measurements: List[RegionMeasurement]
     filtered_mask: np.ndarray
     label_map: np.ndarray
     noise_sigma: float
     derived_min_mean_contrast: float
     stage_counts: List[Dict[str, Any]]
+    summary: Dict[str, Any]
+    model: Dict[str, str]
+    processing_time_s: float
+    stage_timings_ms: Dict[str, float]
     bboxes_image: np.ndarray
     contours_image: np.ndarray
+    final_overlay_image: np.ndarray
 
 
 def _extract_scale_factor(step_log: List[Dict[str, Any]]) -> float:
@@ -666,8 +695,10 @@ def run_full_pipeline(
     prep_config: Optional[PreprocessingConfig] = None,
     det_config: Optional[DetectionConfig] = None,
     filter_config: Optional[NoiseFilterConfig] = None,
+    measurement_config: Optional[MeasurementConfig] = None,
+    severity_config: Optional[SeverityConfig] = None,
 ) -> FullPipelineResult:
-    """Execute full classical CV inspection pipeline: preprocess -> detect -> segment -> filter.
+    """Execute full classical CV inspection pipeline: preprocess -> detect -> merge -> filter -> measure -> classify.
 
     Pure functional orchestration that does not mutate input arrays.
 
@@ -677,43 +708,72 @@ def run_full_pipeline(
         prep_config: PreprocessingConfig (uses defaults if None).
         det_config: DetectionConfig (uses defaults if None).
         filter_config: NoiseFilterConfig (uses defaults if None).
+        measurement_config: MeasurementConfig (uses defaults if None).
+        severity_config: SeverityConfig (uses defaults if None).
 
     Returns:
         FullPipelineResult with all intermediate and final artifacts, accepted/rejected
-        regions, full funnel stage_counts, and rendered bounding box / contour overlays.
+        regions, original-pixel measurements, severity summary, timings, and overlays.
     """
+    t_total_start = time.perf_counter()
+    stage_timings_ms: Dict[str, float] = {}
+
     if prep_config is None:
         prep_config = PreprocessingConfig()
     if det_config is None:
         det_config = DetectionConfig()
     if filter_config is None:
         filter_config = NoiseFilterConfig()
+    if measurement_config is None:
+        measurement_config = MeasurementConfig()
+    if severity_config is None:
+        severity_config = SeverityConfig()
 
     # 1. Preprocessing (reference uses the exact same PreprocessingConfig)
+    t0 = time.perf_counter()
     preprocessed_test, step_log = run_preprocessing(test_image, prep_config)
     scale_factor = _extract_scale_factor(step_log)
 
     preprocessed_ref: Optional[np.ndarray] = None
     if reference_image is not None:
         preprocessed_ref, _ = run_preprocessing(reference_image, prep_config)
+    stage_timings_ms["preprocessing"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
-    # 2. Classical Detection (golden or experimental no-reference)
+    # 2. Classical Detection (golden, self-reference, or experimental background)
+    t0 = time.perf_counter()
     det_result = run_detection(
         test_image=preprocessed_test,
         reference_image=preprocessed_ref,
         config=det_config,
     )
+    stage_timings_ms["detection"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
-    # 3. Connected-Component Segmentation
+    # 3. Connected-Component Segmentation & Fragment Merging (BEFORE noise filtering)
+    t0 = time.perf_counter()
     candidate_regions = segment_regions(
         morphology_mask=det_result.morphology_mask,
         signed_difference=det_result.signed_difference,
         wafer_mask=det_result.wafer_mask,
         scale_factor=scale_factor,
+        merge_gap_px=det_config.merge_gap_px,
     )
-    logger.info("Candidate regions: %d", len(candidate_regions))
+    stage_timings_ms["segmentation_and_merge"] = round((time.perf_counter() - t0) * 1000.0, 2)
+    logger.info("Candidate regions after fragment merge (radius=%d px): %d", det_config.merge_gap_px, len(candidate_regions))
+
+    morph_count = det_result.stage_counts[-1]["candidate_count"] if det_result.stage_counts else len(candidate_regions)
+    merged_count = len(candidate_regions)
+    if det_config.merge_gap_px > 0 and merged_count < morph_count:
+        merge_note = (
+            f"Merged {morph_count - merged_count} nearby fragment(s) within "
+            f"{det_config.merge_gap_px} px radius into {merged_count} candidate region(s)."
+        )
+    elif det_config.merge_gap_px > 0:
+        merge_note = f"No fragments within {det_config.merge_gap_px} px merge radius."
+    else:
+        merge_note = "Fragment merging disabled (merge_gap_px=0)."
 
     # 4. Noise Filtering (reuses Phase 4 MAD-based noise sigma from detection stage)
+    t0 = time.perf_counter()
     noise_sigma = det_result.noise_sigma
     if noise_sigma <= 0.0:
         active_mask = det_result.verifiable_mask if det_result.verifiable_mask is not None else det_result.wafer_mask
@@ -723,6 +783,7 @@ def run_full_pipeline(
         noise_sigma=noise_sigma,
         config=filter_config,
     )
+    stage_timings_ms["noise_filtering"] = round((time.perf_counter() - t0) * 1000.0, 2)
     logger.info("After noise filtering: %d", len(filter_result.accepted_regions))
     logger.info("Final defects: %d", len(filter_result.accepted_regions))
 
@@ -734,6 +795,13 @@ def run_full_pipeline(
 
     # 6. Build full candidate funnel stage_counts with honest increase notes
     raw_funnel: List[Dict[str, Any]] = list(det_result.stage_counts)
+    raw_funnel.append(
+        {
+            "stage": "after_fragment_merge",
+            "candidate_count": merged_count,
+            "note": merge_note,
+        }
+    )
     raw_funnel.extend(filter_result.stage_counts)
     raw_funnel.append({"stage": "final", "candidate_count": len(filter_result.accepted_regions)})
     full_stage_counts = _annotate_stage_count_notes(raw_funnel)
@@ -741,9 +809,83 @@ def run_full_pipeline(
     # Keep det_result.stage_counts synchronized with the full funnel
     det_result.stage_counts = full_stage_counts
 
-    # 7. Render neutral overlays on original image (all OpenCV stays inside cv/)
-    bboxes_image = draw_bounding_boxes(test_image, filter_result.accepted_regions, scale_factor=scale_factor)
-    contours_image = draw_contours(test_image, filter_result.accepted_regions, scale_factor=scale_factor)
+    # 7. Measurement (original image pixels) & Prototype Severity Classification
+    t0 = time.perf_counter()
+    wafer_area_proc_px = int(np.count_nonzero(det_result.wafer_mask))
+    if wafer_area_proc_px <= 0:
+        wafer_area_proc_px = int(preprocessed_test.size)
+    wafer_area_orig_px = float(wafer_area_proc_px) / (scale_factor * scale_factor)
+
+    detected_by: DetectedByPath = (
+        "background" if det_result.path == "no_reference" else det_result.path
+    )
+    measurements = measure_regions(
+        regions=filter_result.accepted_regions,
+        noise_sigma=noise_sigma,
+        detected_by=detected_by,
+        config=measurement_config,
+    )
+    for m in measurements:
+        m.severity = classify_defect_severity(
+            area_px=m.area_px,
+            wafer_area_px=wafer_area_orig_px,
+            config=severity_config,
+        )
+
+    inspection_severity, severity_reason = assess_inspection_severity(
+        defect_areas_px=[m.area_px for m in measurements],
+        defect_severities=[m.severity for m in measurements],
+        wafer_area_px=wafer_area_orig_px,
+        config=severity_config,
+    )
+
+    defect_count = len(measurements)
+    total_defect_area_px = int(sum(m.area_px for m in measurements))
+    largest_defect_area_px = int(max((m.area_px for m in measurements), default=0))
+    average_defect_area_px = round(total_defect_area_px / float(defect_count), 2) if defect_count > 0 else 0.0
+    calibration_status = format_calibration_status(measurement_config)
+
+    summary: Dict[str, Any] = {
+        "defect_count": defect_count,
+        "total_defect_area_px": total_defect_area_px,
+        "largest_defect_area_px": largest_defect_area_px,
+        "average_defect_area_px": average_defect_area_px,
+        "severity": inspection_severity,
+        "severity_reason": severity_reason,
+        "calibration_status": calibration_status,
+        "pixel_size_um": measurement_config.pixel_size_um,
+    }
+    model_info: Dict[str, str] = {
+        "name": MODEL_NAME,
+        "version": MODEL_VERSION,
+        "detection_method": DETECTION_METHOD_LABEL,
+    }
+    stage_timings_ms["measurement_and_severity"] = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    # 8. Render severity-styled overlays on original image (all OpenCV stays inside cv/)
+    t0 = time.perf_counter()
+    severities_map = {m.id: m.severity for m in measurements}
+    bboxes_image = draw_bounding_boxes(
+        test_image,
+        filter_result.accepted_regions,
+        scale_factor=scale_factor,
+        severities=severities_map,
+    )
+    contours_image = draw_contours(
+        test_image,
+        filter_result.accepted_regions,
+        scale_factor=scale_factor,
+        severities=severities_map,
+    )
+    final_overlay_image = draw_final_overlay(
+        test_image,
+        filter_result.accepted_regions,
+        scale_factor=scale_factor,
+        severities=severities_map,
+    )
+    stage_timings_ms["overlays"] = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    processing_time_s = max(round(time.perf_counter() - t_total_start, 6), 1e-6)
 
     return FullPipelineResult(
         preprocessed_test=preprocessed_test,
@@ -752,11 +894,17 @@ def run_full_pipeline(
         detection=det_result,
         accepted_regions=filter_result.accepted_regions,
         rejected_regions=filter_result.rejected_regions,
+        measurements=measurements,
         filtered_mask=filtered_mask,
         label_map=label_map,
         noise_sigma=filter_result.noise_sigma,
         derived_min_mean_contrast=filter_result.derived_min_mean_contrast,
         stage_counts=full_stage_counts,
+        summary=summary,
+        model=model_info,
+        processing_time_s=processing_time_s,
+        stage_timings_ms=stage_timings_ms,
         bboxes_image=bboxes_image,
         contours_image=contours_image,
+        final_overlay_image=final_overlay_image,
     )

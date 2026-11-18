@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ImageUploader } from '../components/ImageUploader';
 import { ErrorMessage } from '../components/ErrorMessage';
+import { MetricCard } from '../components/MetricCard';
+import { SeverityBadge } from '../components/SeverityBadge';
 import {
   uploadInspection,
   runInspection,
@@ -11,6 +13,7 @@ import {
 } from '../services/api';
 
 const IMAGE_TABS: { key: RunImageKind; label: string }[] = [
+  { key: 'final_overlay', label: 'Final Overlay' },
   { key: 'original', label: 'Original' },
   { key: 'preprocessed', label: 'Preprocessed' },
   { key: 'difference', label: 'Difference' },
@@ -45,8 +48,14 @@ export const NewInspectionPage = ({
   const [runResult, setRunResult] = useState<InspectionRunResponse | null>(initialRunResult);
 
   // Active view tab for inspection images
-  const [activeTab, setActiveTab] = useState<RunImageKind>('bboxes');
+  const [activeTab, setActiveTab] = useState<RunImageKind>('final_overlay');
   const [showRejected, setShowRejected] = useState(false);
+  const [showSeverityReason, setShowSeverityReason] = useState(false);
+  const [expandedRegionIds, setExpandedRegionIds] = useState<Record<number, boolean>>({});
+
+  const toggleRegionWhyFlagged = (id: number) => {
+    setExpandedRegionIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,8 +95,12 @@ export const NewInspectionPage = ({
       const result = await runInspection(uploadResult.upload_id);
       setRunResult(result);
       setShowRejected(false);
-      // Default to bounding boxes view when available
-      if (result.bboxes_image_url) {
+      setShowSeverityReason(false);
+      setExpandedRegionIds({});
+      // Default to combined final overlay view when available
+      if (result.final_overlay_image_url) {
+        setActiveTab('final_overlay');
+      } else if (result.bboxes_image_url) {
         setActiveTab('bboxes');
       } else if (result.difference_image_url) {
         setActiveTab('difference');
@@ -115,7 +128,9 @@ export const NewInspectionPage = ({
     setRunResult(null);
     setRunError(null);
     setShowRejected(false);
-    setActiveTab('bboxes');
+    setShowSeverityReason(false);
+    setExpandedRegionIds({});
+    setActiveTab('final_overlay');
   };
 
   return (
@@ -333,6 +348,99 @@ export const NewInspectionPage = ({
           {/* ------------------------------------------------------------- */}
           {runResult && (
             <div className="space-y-8 pt-4">
+              {/* Summary Metrics Row (Phase 6) */}
+              {runResult.summary && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <MetricCard
+                      label="Defects Detected"
+                      value={runResult.summary.defect_count}
+                      subtext={
+                        runResult.summary.defect_count === 0
+                          ? 'Clean inspection'
+                          : `Avg area: ${runResult.summary.average_defect_area_px} px`
+                      }
+                    />
+                    <MetricCard
+                      label="Total Defect Area"
+                      value={`${runResult.summary.total_defect_area_px} px`}
+                      subtext="Original pixel units"
+                    />
+                    <MetricCard
+                      label="Largest Defect"
+                      value={`${runResult.summary.largest_defect_area_px} px`}
+                      subtext={
+                        runResult.summary.defect_count > 0
+                          ? 'Single largest region'
+                          : 'No regions'
+                      }
+                    />
+                    <MetricCard
+                      label="Severity"
+                      subtext={
+                        <button
+                          type="button"
+                          onClick={() => setShowSeverityReason((prev) => !prev)}
+                          className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 underline underline-offset-2 cursor-pointer"
+                        >
+                          {showSeverityReason ? 'Hide reason' : 'Why this severity?'}
+                        </button>
+                      }
+                    >
+                      <div className="pt-0.5">
+                        <SeverityBadge
+                          severity={runResult.summary.severity}
+                          reason={runResult.summary.severity_reason}
+                          size="md"
+                        />
+                      </div>
+                    </MetricCard>
+                    <MetricCard
+                      label="Processing Time"
+                      value={`${runResult.processing_time_s.toFixed(3)} s`}
+                      subtext={`${Math.round(runResult.processing_time_s * 1000)} ms total`}
+                    />
+                    <MetricCard
+                      label="Detection Method"
+                      value={
+                        <span className="text-sm font-sans font-bold text-slate-900">
+                          {runResult.model?.detection_method ?? 'Classical CV Baseline'}
+                        </span>
+                      }
+                      subtext={
+                        runResult.model
+                          ? `${runResult.model.name} v${runResult.model.version}`
+                          : 'WaferInspect-CV v1.0.0'
+                      }
+                    />
+                  </div>
+
+                  {/* Expandable Severity Reason Panel */}
+                  {showSeverityReason && (
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed">
+                      <strong className="text-slate-900">Prototype Severity Heuristic Basis: </strong>
+                      {runResult.summary.severity_reason}
+                      <span className="block text-[11px] text-slate-500 mt-1">
+                        Note: Severity tiers are a documented prototype heuristic based on wafer-area fraction and count escalation, not a fab standard.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Calibration Status Notice */}
+                  <div className="px-3.5 py-2 rounded-lg bg-amber-50/80 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      <strong>Calibration:</strong>{' '}
+                      {runResult.summary.pixel_size_um
+                        ? runResult.summary.calibration_status
+                        : `${runResult.summary.calibration_status} (uncalibrated, pixel units)`}
+                    </span>
+                    <span className="text-[11px] font-mono text-amber-800">
+                      Original frame: {runResult.original_stats.width} &times; {runResult.original_stats.height} px
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Detection Overview Banner */}
               {runResult.detection && (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
@@ -483,24 +591,57 @@ export const NewInspectionPage = ({
                       className="max-h-full max-w-full object-contain rounded shadow-xs"
                     />
                   </div>
+
+                  {/* Visible Severity Overlay Legend (colour + line style/thickness for colour-vision accessibility) */}
+                  <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-700">
+                    <span className="font-bold uppercase tracking-wider text-[10px] text-slate-500">
+                      Severity Overlay Legend:
+                    </span>
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block w-5 h-0 border-t-2 border-dashed border-blue-600" aria-hidden="true" />
+                      <span className="font-mono font-semibold text-blue-800">[L] LOW</span>
+                      <span className="text-slate-500">(thin dashed blue)</span>
+                    </span>
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block w-5 h-0 border-t-2 border-solid border-orange-600" aria-hidden="true" />
+                      <span className="font-mono font-semibold text-orange-800">[M] MEDIUM</span>
+                      <span className="text-slate-500">(medium solid orange)</span>
+                    </span>
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block w-5 h-1 border-y-2 border-red-600" aria-hidden="true" />
+                      <span className="font-mono font-semibold text-red-800">[H] HIGH</span>
+                      <span className="text-slate-500">(thick double red)</span>
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Accepted Regions Table (or Clear Zero-Defects State) */}
+              {/* Accepted Regions Measurement Table (or Clear Zero-Defects State with Severity NONE) */}
               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
-                <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                   <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                    Accepted Defect Regions ({runResult.regions?.length ?? 0})
+                    Defect Measurements ({runResult.regions?.length ?? 0})
                   </h5>
+                  <span className="text-[11px] text-slate-500">
+                    All geometric values reported in original image pixels
+                  </span>
                 </div>
 
                 {!runResult.regions || runResult.regions.length === 0 ? (
-                  <div className="p-8 text-center space-y-1.5">
+                  <div className="p-8 text-center space-y-2">
+                    <div className="flex justify-center">
+                      <SeverityBadge
+                        severity={runResult.summary?.severity ?? 'NONE'}
+                        reason={runResult.summary?.severity_reason}
+                        size="md"
+                      />
+                    </div>
                     <p className="text-sm font-semibold text-emerald-800">
                       No defects found
                     </p>
-                    <p className="text-xs text-slate-500">
-                      All candidate regions were either below the noise ceiling or filtered out as sensor noise.
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      {runResult.summary?.severity_reason ??
+                        'All candidate regions were either below the noise ceiling or filtered out as sensor noise.'}
                     </p>
                   </div>
                 ) : (
@@ -508,55 +649,86 @@ export const NewInspectionPage = ({
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
                         <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold tracking-wider">
-                          <th className="py-2.5 px-4">ID</th>
+                          <th className="py-2.5 px-3">ID</th>
+                          <th className="py-2.5 px-3">Severity</th>
                           <th className="py-2.5 px-3 text-right">Area (px)</th>
-                          <th className="py-2.5 px-4">BBox (x, y, w, h)</th>
-                          <th className="py-2.5 px-4">Centroid (x, y)</th>
-                          <th className="py-2.5 px-3">Polarity</th>
-                          <th className="py-2.5 px-3 text-right">Mean Contrast</th>
-                          <th className="py-2.5 px-3">Edge</th>
+                          <th className="py-2.5 px-2.5 text-right">Width</th>
+                          <th className="py-2.5 px-2.5 text-right">Height</th>
+                          <th className="py-2.5 px-3 text-right">Length</th>
+                          <th className="py-2.5 px-3">Centroid (x, y)</th>
+                          <th className="py-2.5 px-3 text-right">Perimeter</th>
+                          <th className="py-2.5 px-3 text-right">CNR</th>
+                          <th className="py-2.5 px-3">Why Flagged</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {runResult.regions.map((region) => (
-                          <tr key={region.id} className="hover:bg-slate-50/80">
-                            <td className="py-2.5 px-4 font-mono font-semibold text-slate-900">
-                              #{region.id}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-right text-slate-800">
-                              {region.area_px}
-                            </td>
-                            <td className="py-2.5 px-4 font-mono text-slate-700">
-                              ({region.bbox[0]}, {region.bbox[1]}, {region.bbox[2]}, {region.bbox[3]})
-                            </td>
-                            <td className="py-2.5 px-4 font-mono text-slate-700">
-                              ({region.centroid[0]}, {region.centroid[1]})
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                                  region.polarity === 'bright'
-                                    ? 'bg-sky-50 text-sky-800 border-sky-200'
-                                    : 'bg-slate-100 text-slate-700 border-slate-300'
-                                }`}
-                              >
-                                {region.polarity}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-right text-slate-700">
-                              {region.mean_contrast}
-                            </td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600">
-                              {region.touches_edge ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                  Rim
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">Interior</span>
+                        {runResult.regions.map((region) => {
+                          const isExpanded = Boolean(expandedRegionIds[region.id]);
+                          return (
+                            <Fragment key={region.id}>
+                              <tr className="hover:bg-slate-50/80">
+                                <td className="py-2.5 px-3 font-mono font-semibold text-slate-900">
+                                  #{region.id}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <SeverityBadge severity={region.severity ?? 'LOW'} />
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-right text-slate-800">
+                                  {region.area_px}
+                                </td>
+                                <td className="py-2.5 px-2.5 font-mono text-right text-slate-700">
+                                  {region.width_px ?? region.bbox[2]}
+                                </td>
+                                <td className="py-2.5 px-2.5 font-mono text-right text-slate-700">
+                                  {region.height_px ?? region.bbox[3]}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-right text-slate-700">
+                                  {region.length_px}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-slate-700">
+                                  ({region.centroid[0]}, {region.centroid[1]})
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-right text-slate-700">
+                                  {region.perimeter_px}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-right text-slate-800">
+                                  {region.contrast_to_noise}x
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleRegionWhyFlagged(region.id)}
+                                    aria-expanded={isExpanded}
+                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline underline-offset-2 cursor-pointer"
+                                  >
+                                    {isExpanded ? 'Hide' : 'Explain'}
+                                  </button>
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-slate-50/90">
+                                  <td colSpan={10} className="px-4 py-3 text-xs text-slate-700 space-y-1.5">
+                                    <p className="font-medium text-slate-900">
+                                      {region.why_flagged}
+                                    </p>
+                                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] font-mono text-slate-600">
+                                      <span>Thickness: {region.thickness_px} px</span>
+                                      <span>Angle: {region.angle_deg}&deg;</span>
+                                      <span>Elongation: {region.elongation}</span>
+                                      <span>Eq. Diam: {region.equivalent_diameter_px} px</span>
+                                      <span>Polarity: {region.polarity}</span>
+                                      <span>Peak Contrast: {region.peak_contrast}</span>
+                                      <span>Edge: {region.touches_edge ? 'Rim' : 'Interior'}</span>
+                                      {region.area_um2 != null && (
+                                        <span>Calibrated Area: {region.area_um2} &mu;m&sup2;</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </td>
-                          </tr>
-                        ))}
+                            </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

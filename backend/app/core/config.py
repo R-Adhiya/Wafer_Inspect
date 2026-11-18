@@ -8,6 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR: Path = Path(__file__).resolve().parents[3]
 
+# Single-source-of-truth model metadata constants reported in inspection responses
+MODEL_NAME: str = "WaferInspect-CV"
+MODEL_VERSION: str = "1.0.0"
+DETECTION_METHOD_LABEL: str = "Classical CV Baseline"
+
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or defaults."""
