@@ -36,6 +36,55 @@ export interface StepLogItem {
   std: number;
 }
 
+export interface StageCount {
+  stage: string;
+  candidate_count: number;
+}
+
+export interface DetectionSummary {
+  path: 'golden' | 'no_reference';
+  label: string;
+  threshold_method: string;
+  threshold_value: number;
+  threshold_reason: string;
+  wafer_center: [number, number];
+  wafer_radius: number;
+  is_full_frame: boolean;
+  alignment_info: Record<string, any>;
+  stage_counts: StageCount[];
+  warnings: string[];
+}
+
+export interface AcceptedRegion {
+  id: number;
+  bbox: [number, number, number, number];
+  area_px: number;
+  centroid: [number, number];
+  polarity: 'bright' | 'dark';
+  mean_contrast: number;
+  peak_contrast: number;
+  touches_edge: boolean;
+  reason?: string;
+  original_bbox?: [number, number, number, number] | null;
+  original_centroid?: [number, number] | null;
+}
+
+export interface RejectedRegion {
+  id: number;
+  area_px: number;
+  mean_contrast: number;
+  reason: string;
+}
+
+export type RunImageKind =
+  | 'original'
+  | 'preprocessed'
+  | 'difference'
+  | 'mask'
+  | 'filtered_mask'
+  | 'bboxes'
+  | 'contours';
+
 export interface InspectionRunResponse {
   upload_id: string;
   step_log: StepLogItem[];
@@ -43,6 +92,15 @@ export interface InspectionRunResponse {
   preprocessed_stats: ImageStats;
   original_image_url: string;
   preprocessed_image_url: string;
+  difference_image_url?: string | null;
+  mask_image_url?: string | null;
+  filtered_mask_image_url?: string | null;
+  bboxes_image_url?: string | null;
+  contours_image_url?: string | null;
+  detection?: DetectionSummary | null;
+  stage_counts: StageCount[];
+  regions: AcceptedRegion[];
+  rejected_regions: RejectedRegion[];
 }
 
 export interface ApiErrorDetail {
@@ -170,8 +228,9 @@ export async function runInspection(
 }
 
 /**
- * Constructs preview URL for original or preprocessed run images.
+ * Constructs preview URL for inspection run images
+ * (original, preprocessed, difference, mask, filtered_mask, bboxes, contours).
  */
-export function getRunImageUrl(uploadId: string, kind: 'original' | 'preprocessed'): string {
+export function getRunImageUrl(uploadId: string, kind: RunImageKind): string {
   return `${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/image/${kind}`;
 }

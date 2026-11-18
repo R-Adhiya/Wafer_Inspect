@@ -1,48 +1,37 @@
-"""Generate a synthetic noisy wafer image for computer vision testing.
+"""Generate synthetic wafer images for computer vision inspection testing.
 
-Produces a 512x512 grayscale image simulating a silicon wafer disk with:
-1. Substrate disk and dark wafer background.
-2. Subtle die grid pattern.
-3. Spatial illumination gradient (triggers adaptive CLAHE).
-4. Zero-mean Gaussian noise (triggers denoising filter).
+Wraps the shared synthetic wafer generator in backend/app/utils/synthetic.py.
+Supports generating either a single noisy wafer or a deterministic (reference, test)
+pair with 4 injected synthetic defects (bright blob, dark blob, scratch, rim defect).
+All data produced is purely synthetic for inspection validation.
 """
 
+from pathlib import Path
 import sys
-import numpy as np
 from PIL import Image
+
+# Ensure backend root is on sys.path
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+BACKEND_DIR = PROJECT_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.utils.synthetic import create_standard_synthetic_pair, generate_synthetic_wafer  # noqa: E402
 
 
 def generate_noisy_wafer(output_path: str = "noisy_wafer.png", size: int = 512) -> None:
-    """Generate and save synthetic noisy wafer image with illumination gradient."""
-    np.random.seed(42)
+    """Generate and save a single synthetic noisy wafer image with illumination gradient."""
+    image_uint8, _ = generate_synthetic_wafer(
+        size=size,
+        seed=42,
+        wafer_radius_ratio=0.44,
+        noise_std=18.0,
+        has_gradient=True,
+        gradient_strength=40.0,
+        defects=None,
+    )
 
-    # 1. Base circular wafer disk
-    y, x = np.ogrid[:size, :size]
-    center_y, center_x = size / 2.0, size / 2.0
-    radius = size * 0.42
-    wafer_mask = (x - center_x) ** 2 + (y - center_y) ** 2 <= radius ** 2
-
-    # Background is dark (~20), wafer substrate base is medium gray (~135)
-    image = np.full((size, size), 20.0, dtype=np.float32)
-    image[wafer_mask] = 135.0
-
-    # 2. Add die grid pattern
-    grid_spacing = 32
-    grid_mask = ((x % grid_spacing < 2) | (y % grid_spacing < 2)) & wafer_mask
-    image[grid_mask] = 110.0
-
-    # 3. Add illumination gradient (bright at top-left, darker at bottom-right)
-    gradient = ((size - x) + (size - y)) / (2.0 * size) * 80.0
-    image[wafer_mask] += gradient[wafer_mask] - 40.0
-
-    # 4. Add Gaussian noise (std ~ 18.0)
-    noise = np.random.normal(0, 18.0, (size, size))
-    image += noise
-
-    # Clip intensity to valid 8-bit range
-    image_uint8 = np.clip(image, 0, 255).astype(np.uint8)
-
-    # Save to disk
     img = Image.fromarray(image_uint8, mode="L")
     img.save(output_path)
     print(
@@ -51,6 +40,26 @@ def generate_noisy_wafer(output_path: str = "noisy_wafer.png", size: int = 512) 
     )
 
 
+def generate_four_defect_pair(ref_path: str, test_path: str, size: int = 512) -> None:
+    """Generate a synthetic golden reference and test wafer pair with 4 injected defects."""
+    defects = [
+        {"type": "bright_blob", "center": (165.0, 175.0), "radius": 8.0, "contrast": 60.0},
+        {"type": "dark_blob", "center": (345.0, 185.0), "radius": 9.0, "contrast": -60.0},
+        {"type": "scratch", "start": (190.0, 315.0), "end": (260.0, 345.0), "width": 3, "contrast": 65.0},
+        {"type": "bright_blob", "center": (472.0, 256.0), "radius": 10.0, "contrast": 65.0},
+    ]
+    ref_img, test_img, gt = create_standard_synthetic_pair(size=size, seed=42, defects=defects)
+    Image.fromarray(ref_img, mode="L").save(ref_path)
+    Image.fromarray(test_img, mode="L").save(test_path)
+    print(
+        f"Generated synthetic reference '{ref_path}' and 4-defect test wafer '{test_path}' "
+        f"({len(gt)} ground-truth defects)."
+    )
+
+
 if __name__ == "__main__":
-    out_file = sys.argv[1] if len(sys.argv) > 1 else "noisy_wafer.png"
-    generate_noisy_wafer(out_file)
+    if len(sys.argv) >= 4 and sys.argv[1] == "--pair":
+        generate_four_defect_pair(sys.argv[2], sys.argv[3])
+    else:
+        out_file = sys.argv[1] if len(sys.argv) > 1 else "noisy_wafer.png"
+        generate_noisy_wafer(out_file)

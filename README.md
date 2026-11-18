@@ -4,5 +4,6 @@ WaferInspect is an automated wafer defect inspection and measurement prototype s
 
 ## Scripts & Utilities
 
-- `scripts/generate_noisy_wafer.py`: Generates synthetic wafer test images (512x512 grayscale) simulating silicon wafer substrate disks, die grids, additive Gaussian sensor noise, and radial/linear illumination gradients to exercise denoising and adaptive contrast enhancement.
-- `scripts/test_flow.ps1`: Automated PowerShell script to verify the full backend inspection workflow end-to-end. Starts the FastAPI server, runs the health check, generates and uploads a synthetic test wafer, executes the computer vision preprocessing pipeline, logs step-by-step metrics and timing, and downloads the resulting preprocessed artifact.
+- `scripts/generate_noisy_wafer.py`: Generates synthetic wafer test images (512x512 grayscale) via `backend/app/utils/synthetic.py`, simulating silicon wafer substrate disks, die grids, additive Gaussian sensor noise, and illumination gradients.
+- `scripts/evaluate_detection.py`: Accuracy evaluation benchmark that runs the full classical CV pipeline (preprocessing, detection, segmentation, noise filtering) over 30 seeded synthetic wafers per (diameter, contrast) cell for both golden-reference and experimental no-reference paths, reporting post-filter recall, false positives per image, and mean funnel counts.
+- `scripts/test_flow.ps1`: Automated PowerShell script to verify the full-stack inspection workflow end-to-end. Launches both backend and frontend servers, generates a synthetic wafer with 4 injected defects, runs golden and no-reference inspection via API, prints stage funnel counts and accepted/rejected regions, and verifies all image artifact endpoints.

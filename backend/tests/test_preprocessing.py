@@ -191,29 +191,19 @@ def test_clahe_raises_std_on_low_contrast():
 
 
 def test_auto_contrast_skips_high_contrast_and_applies_to_low():
-    """Verify auto mode only applies CLAHE when criteria are met and includes measured stats in reason."""
-    # 1. High contrast, uniform quadrants -> skip
+    """Verify auto mode only applies CLAHE when criteria are met using default parameters."""
+    # 1. High contrast, uniform quadrants -> skip using defaults
     quad = np.tile(np.linspace(10, 240, 50, dtype=np.uint8), (50, 1))
     high_contrast = np.block([[quad, quad], [quad, quad]])
-    _, decision_skip = enhance_contrast(
-        high_contrast,
-        method="auto",
-        low_contrast_std_threshold=25.0,
-        gradient_threshold=30.0,
-    )
+    _, decision_skip = enhance_contrast(high_contrast)
     assert decision_skip["applied"] is False
     assert "Skipped CLAHE" in decision_skip["reason"]
     assert str(decision_skip["std"]) in decision_skip["reason"]
 
-    # 2. Low contrast -> apply
+    # 2. Low contrast -> apply using defaults
     rng = np.random.RandomState(42)
     low_contrast = rng.randint(120, 130, size=(100, 100), dtype=np.uint8)
-    _, decision_apply = enhance_contrast(
-        low_contrast,
-        method="auto",
-        low_contrast_std_threshold=25.0,
-        gradient_threshold=30.0,
-    )
+    _, decision_apply = enhance_contrast(low_contrast)
     assert decision_apply["applied"] is True
     assert "Applied CLAHE" in decision_apply["reason"]
     assert str(decision_apply["std"]) in decision_apply["reason"]
