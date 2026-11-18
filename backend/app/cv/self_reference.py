@@ -45,7 +45,7 @@ class SelfReferenceResult:
 
     reference_image: np.ndarray  # 2D uint8
     verifiable_mask: np.ndarray  # 2D uint8 (255 where verifiable, 0 where unverifiable/outside wafer)
-    difference_image: np.ndarray  # 2D uint8
+    difference_image: np.ndarray  # 2D uint8 (shift-tolerant when enabled)
     signed_difference: np.ndarray  # 2D int16
     pitch_x: int
     pitch_y: int
@@ -53,6 +53,7 @@ class SelfReferenceResult:
     unverifiable_fraction: float
     shift_tolerance_applied: bool
     noise_sigma: float = 0.0
+    exact_difference_image: Optional[np.ndarray] = None  # 2D uint8 unshifted |test - ref| for measurement refinement
 
 
 def _next_pow2(n: int) -> int:
@@ -399,4 +400,5 @@ def build_self_reference(
         unverifiable_fraction=round(unverifiable_fraction, 4),
         shift_tolerance_applied=use_shift_tolerance,
         noise_sigma=round(unshifted_sigma, 4),
+        exact_difference_image=unshifted_abs,
     )

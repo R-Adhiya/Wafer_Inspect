@@ -20,7 +20,11 @@ BACKEND_DIR = PROJECT_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.utils.synthetic import create_standard_synthetic_pair, generate_synthetic_wafer  # noqa: E402
+from app.utils.synthetic import (  # noqa: E402
+    create_standard_synthetic_pair,
+    generate_layout_wafer,
+    generate_synthetic_wafer,
+)
 
 
 def generate_noisy_wafer(output_path: str = "noisy_wafer.png", size: int = 512) -> None:
@@ -87,10 +91,29 @@ def generate_four_defect_pair(
     )
 
 
+def generate_pattern_layout_image(layout: str, output_path: str, count: int = 8, seed: int = 8305) -> None:
+    """Generate a synthetic patterned wafer with defects arranged in `layout`."""
+    img, gt, label = generate_layout_wafer(
+        defect_layout=layout,  # type: ignore[arg-type]
+        count=count,
+        size=512,
+        seed=seed,
+        grid_pitch=32,
+        die_pattern="grid",
+        noise_std=5.0,
+        radius=7.0,
+        contrast=65.0,
+    )
+    Image.fromarray(img, mode="L").save(output_path)
+    print(f"Generated layout '{layout}' (GT={label}, n={len(gt)}) at '{output_path}'")
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 4 and sys.argv[1] == "--pair":
         gt_out = sys.argv[5] if len(sys.argv) >= 6 and sys.argv[4] == "--gt" else None
         generate_four_defect_pair(sys.argv[2], sys.argv[3], gt_path=gt_out)
+    elif len(sys.argv) >= 4 and sys.argv[1] == "--layout":
+        generate_pattern_layout_image(sys.argv[2], sys.argv[3])
     else:
         out_file = sys.argv[1] if len(sys.argv) > 1 else "noisy_wafer.png"
         generate_noisy_wafer(out_file)

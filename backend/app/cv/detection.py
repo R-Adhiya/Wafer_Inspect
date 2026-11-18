@@ -44,6 +44,7 @@ class DetectionResult:
     unverifiable_fraction: Optional[float] = None
     verifiable_mask: Optional[np.ndarray] = None
     noise_sigma: float = 0.0
+    exact_difference_image: Optional[np.ndarray] = None
 
 
 def estimate_wafer_mask(

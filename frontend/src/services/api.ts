@@ -63,12 +63,53 @@ export interface DetectionSummary {
 export type DefectSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
 export type InspectionSeverity = 'NONE' | DefectSeverity;
 
+export type PatternType =
+  | 'INSUFFICIENT_DATA'
+  | 'EDGE_RING'
+  | 'CENTER_CLUSTER'
+  | 'DONUT'
+  | 'LOCAL_CLUSTER'
+  | 'SCRATCH_LINE'
+  | 'RANDOM_SCATTER';
+
+export interface RadialBinMetric {
+  bin: string;
+  r_min: number;
+  r_max: number;
+  observed: number;
+  expected_random: number;
+}
+
+export interface PatternResult {
+  type: PatternType;
+  confidence: number;
+  p_value?: number | null;
+  explanation: string;
+  metrics: {
+    n?: number;
+    wafer_center_orig?: [number, number];
+    wafer_radius_orig?: number;
+    edge_fraction?: number;
+    center_fraction?: number;
+    donut_fraction?: number;
+    largest_angular_gap_deg?: number;
+    line_explained_variance?: number;
+    line_span_ratio?: number;
+    nn_ratio?: number;
+    radial_bins?: RadialBinMetric[];
+    [key: string]: any;
+  };
+  supporting_defect_ids: number[];
+  warnings: string[];
+}
+
 export interface AcceptedRegion {
   id: number;
   bbox: [number, number, number, number];
   width_px: number;
   height_px: number;
   area_px: number;
+  detected_area_px?: number;
   centroid: [number, number];
   perimeter_px: number;
   equivalent_diameter_px: number;
@@ -108,6 +149,7 @@ export interface InspectionSummary {
   severity_reason: string;
   calibration_status: string;
   pixel_size_um?: number | null;
+  pattern?: PatternResult | null;
 }
 
 export interface ModelInfo {
@@ -124,7 +166,8 @@ export type RunImageKind =
   | 'filtered_mask'
   | 'bboxes'
   | 'contours'
-  | 'final_overlay';
+  | 'final_overlay'
+  | 'pattern_overlay';
 
 export interface InspectionRunResponse {
   upload_id: string;
@@ -139,12 +182,14 @@ export interface InspectionRunResponse {
   bboxes_image_url?: string | null;
   contours_image_url?: string | null;
   final_overlay_image_url?: string | null;
+  pattern_overlay_image_url?: string | null;
   detection?: DetectionSummary | null;
   stage_counts: StageCount[];
   regions: AcceptedRegion[];
   rejected_regions: RejectedRegion[];
   summary?: InspectionSummary | null;
   model?: ModelInfo | null;
+  pattern?: PatternResult | null;
   processing_time_s: number;
   stage_timings_ms: Record<string, number>;
 }

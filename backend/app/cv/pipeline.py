@@ -31,12 +31,19 @@ from app.cv.measurement import (
     RegionMeasurement,
     format_calibration_status,
     measure_regions,
+    refine_regions,
 )
 from app.cv.noise_filter import (
     NoiseFilterConfig,
     NoiseFilterResult,
     RejectedRegion,
     filter_regions,
+)
+from app.cv.pattern_analysis import (
+    PatternConfig,
+    PatternResult,
+    analyze_spatial_pattern,
+    draw_pattern_overlay,
 )
 from app.cv.preprocessing import (
     PreprocessingConfig,
@@ -491,6 +498,7 @@ def run_detection(
     verifiable_mask: Optional[np.ndarray] = None
     active_mask = wafer_mask
     noise_sigma_override: Optional[float] = None
+    exact_diff_image: Optional[np.ndarray] = None
 
     if is_golden and reference_image is not None:
         path_name: Literal["golden", "self_reference", "no_reference"] = "golden"
@@ -530,6 +538,7 @@ def run_detection(
             alignment_info["photometric_matching_applied"] = photo_applied
 
         diff_image, signed_diff = compute_golden_difference(test_image, aligned_ref, wafer_mask)
+        exact_diff_image = diff_image
         _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
 
     else:
@@ -549,6 +558,7 @@ def run_detection(
                 wafer_mask=wafer_mask,
                 background_blur_sigma_ratio=config.background_blur_sigma_ratio,
             )
+            exact_diff_image = diff_image
             _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
         else:
             pitch_est = estimate_die_pitch(
@@ -576,6 +586,11 @@ def run_detection(
                 verifiable_mask = self_ref.verifiable_mask
                 active_mask = self_ref.verifiable_mask
                 diff_image = self_ref.difference_image
+                exact_diff_image = (
+                    self_ref.exact_difference_image
+                    if self_ref.exact_difference_image is not None
+                    else self_ref.difference_image
+                )
                 signed_diff = self_ref.signed_difference
                 computed_sigma = self_ref.noise_sigma
                 noise_sigma_override = self_ref.noise_sigma
@@ -598,6 +613,7 @@ def run_detection(
                     wafer_mask=wafer_mask,
                     background_blur_sigma_ratio=config.background_blur_sigma_ratio,
                 )
+                exact_diff_image = diff_image
                 _, computed_sigma = estimate_noise_sigma(diff_image, wafer_mask)
 
     # 3. Thresholding with Noise Floor Guard (strictly inside active_mask)
@@ -651,12 +667,13 @@ def run_detection(
         unverifiable_fraction=unverifiable_fraction,
         verifiable_mask=verifiable_mask,
         noise_sigma=round(float(computed_sigma), 4),
+        exact_difference_image=exact_diff_image,
     )
 
 
 @dataclass
 class FullPipelineResult:
-    """Complete end-to-end result of preprocessing, detection, segmentation, filtering, measurement, and severity."""
+    """Complete end-to-end result of preprocessing, detection, segmentation, filtering, measurement, severity, and pattern analysis."""
 
     preprocessed_test: np.ndarray
     step_log: List[Dict[str, Any]]
@@ -672,11 +689,13 @@ class FullPipelineResult:
     stage_counts: List[Dict[str, Any]]
     summary: Dict[str, Any]
     model: Dict[str, str]
+    pattern: PatternResult
     processing_time_s: float
     stage_timings_ms: Dict[str, float]
     bboxes_image: np.ndarray
     contours_image: np.ndarray
     final_overlay_image: np.ndarray
+    pattern_overlay_image: np.ndarray
 
 
 def _extract_scale_factor(step_log: List[Dict[str, Any]]) -> float:
@@ -697,8 +716,9 @@ def run_full_pipeline(
     filter_config: Optional[NoiseFilterConfig] = None,
     measurement_config: Optional[MeasurementConfig] = None,
     severity_config: Optional[SeverityConfig] = None,
+    pattern_config: Optional[PatternConfig] = None,
 ) -> FullPipelineResult:
-    """Execute full classical CV inspection pipeline: preprocess -> detect -> merge -> filter -> measure -> classify.
+    """Execute full classical CV inspection pipeline: preprocess -> detect -> merge -> filter -> refine -> measure -> classify -> pattern.
 
     Pure functional orchestration that does not mutate input arrays.
 
@@ -710,10 +730,12 @@ def run_full_pipeline(
         filter_config: NoiseFilterConfig (uses defaults if None).
         measurement_config: MeasurementConfig (uses defaults if None).
         severity_config: SeverityConfig (uses defaults if None).
+        pattern_config: PatternConfig (uses defaults if None).
 
     Returns:
         FullPipelineResult with all intermediate and final artifacts, accepted/rejected
-        regions, original-pixel measurements, severity summary, timings, and overlays.
+        regions, refined original-pixel measurements, severity summary, spatial pattern
+        diagnosis, timings, and overlays.
     """
     t_total_start = time.perf_counter()
     stage_timings_ms: Dict[str, float] = {}
@@ -728,6 +750,8 @@ def run_full_pipeline(
         measurement_config = MeasurementConfig()
     if severity_config is None:
         severity_config = SeverityConfig()
+    if pattern_config is None:
+        pattern_config = PatternConfig()
 
     # 1. Preprocessing (reference uses the exact same PreprocessingConfig)
     t0 = time.perf_counter()
@@ -787,10 +811,28 @@ def run_full_pipeline(
     logger.info("After noise filtering: %d", len(filter_result.accepted_regions))
     logger.info("Final defects: %d", len(filter_result.accepted_regions))
 
-    # 5. Build final filtered mask and label map
+    # 5. Half-maximum boundary refinement (uses exact unshifted difference image)
+    detected_regions = filter_result.accepted_regions
+    t0 = time.perf_counter()
+    if measurement_config.refine_measurements and detected_regions:
+        exact_diff = (
+            det_result.exact_difference_image
+            if det_result.exact_difference_image is not None
+            else det_result.difference_image
+        )
+        effective_regions = refine_regions(
+            regions=detected_regions,
+            exact_difference=exact_diff,
+            wafer_mask=det_result.wafer_mask,
+            pad_px=measurement_config.refine_pad_px,
+        )
+    else:
+        effective_regions = detected_regions
+
+    # Build final filtered mask and label map aligned with measured regions
     filtered_mask, label_map = build_filtered_mask_and_labels(
         image_shape=preprocessed_test.shape[:2],
-        accepted_regions=filter_result.accepted_regions,
+        accepted_regions=effective_regions,
     )
 
     # 6. Build full candidate funnel stage_counts with honest increase notes
@@ -803,14 +845,13 @@ def run_full_pipeline(
         }
     )
     raw_funnel.extend(filter_result.stage_counts)
-    raw_funnel.append({"stage": "final", "candidate_count": len(filter_result.accepted_regions)})
+    raw_funnel.append({"stage": "final", "candidate_count": len(effective_regions)})
     full_stage_counts = _annotate_stage_count_notes(raw_funnel)
 
     # Keep det_result.stage_counts synchronized with the full funnel
     det_result.stage_counts = full_stage_counts
 
     # 7. Measurement (original image pixels) & Prototype Severity Classification
-    t0 = time.perf_counter()
     wafer_area_proc_px = int(np.count_nonzero(det_result.wafer_mask))
     if wafer_area_proc_px <= 0:
         wafer_area_proc_px = int(preprocessed_test.size)
@@ -820,10 +861,11 @@ def run_full_pipeline(
         "background" if det_result.path == "no_reference" else det_result.path
     )
     measurements = measure_regions(
-        regions=filter_result.accepted_regions,
+        regions=effective_regions,
         noise_sigma=noise_sigma,
         detected_by=detected_by,
         config=measurement_config,
+        detected_regions=detected_regions,
     )
     for m in measurements:
         m.severity = classify_defect_severity(
@@ -838,12 +880,37 @@ def run_full_pipeline(
         wafer_area_px=wafer_area_orig_px,
         config=severity_config,
     )
+    stage_timings_ms["measurement_and_severity"] = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    # 8. Wafer-level Spatial Pattern Diagnosis (does NOT modify inspection severity)
+    t0 = time.perf_counter()
+    orig_h, orig_w = test_image.shape[:2]
+    pattern_result = analyze_spatial_pattern(
+        measurements=measurements,
+        wafer_center=det_result.wafer_center,
+        wafer_radius=det_result.wafer_radius,
+        image_size=(orig_w, orig_h),
+        scale_factor=scale_factor,
+        is_full_frame=det_result.is_full_frame,
+        config=pattern_config,
+    )
+    stage_timings_ms["pattern_analysis"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
     defect_count = len(measurements)
     total_defect_area_px = int(sum(m.area_px for m in measurements))
     largest_defect_area_px = int(max((m.area_px for m in measurements), default=0))
     average_defect_area_px = round(total_defect_area_px / float(defect_count), 2) if defect_count > 0 else 0.0
     calibration_status = format_calibration_status(measurement_config)
+
+    pattern_summary_dict: Dict[str, Any] = {
+        "type": pattern_result.type,
+        "confidence": pattern_result.confidence,
+        "p_value": pattern_result.p_value,
+        "explanation": pattern_result.explanation,
+        "metrics": pattern_result.metrics,
+        "supporting_defect_ids": pattern_result.supporting_defect_ids,
+        "warnings": pattern_result.warnings,
+    }
 
     summary: Dict[str, Any] = {
         "defect_count": defect_count,
@@ -854,34 +921,39 @@ def run_full_pipeline(
         "severity_reason": severity_reason,
         "calibration_status": calibration_status,
         "pixel_size_um": measurement_config.pixel_size_um,
+        "pattern": pattern_summary_dict,
     }
     model_info: Dict[str, str] = {
         "name": MODEL_NAME,
         "version": MODEL_VERSION,
         "detection_method": DETECTION_METHOD_LABEL,
     }
-    stage_timings_ms["measurement_and_severity"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
-    # 8. Render severity-styled overlays on original image (all OpenCV stays inside cv/)
+    # 9. Render severity-styled overlays & pattern overlay on original image (all OpenCV stays inside cv/)
     t0 = time.perf_counter()
     severities_map = {m.id: m.severity for m in measurements}
     bboxes_image = draw_bounding_boxes(
         test_image,
-        filter_result.accepted_regions,
+        effective_regions,
         scale_factor=scale_factor,
         severities=severities_map,
     )
     contours_image = draw_contours(
         test_image,
-        filter_result.accepted_regions,
+        effective_regions,
         scale_factor=scale_factor,
         severities=severities_map,
     )
     final_overlay_image = draw_final_overlay(
         test_image,
-        filter_result.accepted_regions,
+        effective_regions,
         scale_factor=scale_factor,
         severities=severities_map,
+    )
+    pattern_overlay_image = draw_pattern_overlay(
+        test_image,
+        measurements=measurements,
+        pattern=pattern_result,
     )
     stage_timings_ms["overlays"] = round((time.perf_counter() - t0) * 1000.0, 2)
 
@@ -892,7 +964,7 @@ def run_full_pipeline(
         step_log=step_log,
         scale_factor=scale_factor,
         detection=det_result,
-        accepted_regions=filter_result.accepted_regions,
+        accepted_regions=effective_regions,
         rejected_regions=filter_result.rejected_regions,
         measurements=measurements,
         filtered_mask=filtered_mask,
@@ -902,9 +974,11 @@ def run_full_pipeline(
         stage_counts=full_stage_counts,
         summary=summary,
         model=model_info,
+        pattern=pattern_result,
         processing_time_s=processing_time_s,
         stage_timings_ms=stage_timings_ms,
         bboxes_image=bboxes_image,
         contours_image=contours_image,
         final_overlay_image=final_overlay_image,
+        pattern_overlay_image=pattern_overlay_image,
     )

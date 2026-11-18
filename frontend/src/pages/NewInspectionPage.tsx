@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react';
 import { ImageUploader } from '../components/ImageUploader';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { MetricCard } from '../components/MetricCard';
+import { PatternCard } from '../components/PatternCard';
 import { SeverityBadge } from '../components/SeverityBadge';
 import {
   uploadInspection,
@@ -14,6 +15,7 @@ import {
 
 const IMAGE_TABS: { key: RunImageKind; label: string }[] = [
   { key: 'final_overlay', label: 'Final Overlay' },
+  { key: 'pattern_overlay', label: 'Pattern Overlay' },
   { key: 'original', label: 'Original' },
   { key: 'preprocessed', label: 'Preprocessed' },
   { key: 'difference', label: 'Difference' },
@@ -441,6 +443,9 @@ export const NewInspectionPage = ({
                 </div>
               )}
 
+              {/* Spatial Pattern Diagnosis Card (Phase 6B) */}
+              {runResult.pattern && <PatternCard pattern={runResult.pattern} />}
+
               {/* Detection Overview Banner */}
               {runResult.detection && (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
@@ -712,6 +717,9 @@ export const NewInspectionPage = ({
                                       {region.why_flagged}
                                     </p>
                                     <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] font-mono text-slate-600">
+                                      {region.detected_area_px != null && (
+                                        <span>Pre-refinement Area: {region.detected_area_px} px</span>
+                                      )}
                                       <span>Thickness: {region.thickness_px} px</span>
                                       <span>Angle: {region.angle_deg}&deg;</span>
                                       <span>Elongation: {region.elongation}</span>

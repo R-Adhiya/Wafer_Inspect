@@ -504,3 +504,104 @@ def test_api_phase6_summary_model_measurements_final_overlay_and_clean_none():
     # final_overlay still renders cleanly on 0-defect wafers
     clean_overlay = client.get(f"/inspection/run/{clean_id}/image/final_overlay")
     assert clean_overlay.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 9. Step 0d: End-to-End Half-Max Refinement Tests (Full Default Pipeline)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("path_mode", ["golden", "self_reference"])
+def test_end_to_end_refinement_improves_disc_accuracy_both_paths(path_mode: str):
+    """Verify full default pipeline half-max refinement accuracy on discs (tolerances from docs/measurement_accuracy.md).
+
+    Stated tolerances (taken from measured P90 in docs/measurement_accuracy.md):
+      - disc d=16, contrast=30: refined area error <= 8% (P90=4.8% golden / 1.5% self_ref),
+        centroid error <= 0.5 px (P90=0.21 px golden / 0.13 px self_ref).
+      - refinement strictly reduces area error vs refine_measurements=False at contrast=30.
+      - detected_area_px preserves the pre-refinement detection mask area for transparency.
+    """
+    defect = {"type": "bright_blob", "center": (215.0, 225.0), "radius": 8.0, "contrast": 30.0}
+    if path_mode == "golden":
+        ref_img, test_img, gt = create_standard_synthetic_pair(
+            size=512, seed=7501, defects=[defect], grid_pitch=32, die_pattern="grid"
+        )
+        det_cfg = DetectionConfig()
+    else:
+        test_img, gt = generate_synthetic_wafer(
+            size=512, seed=7501, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=[defect]
+        )
+        ref_img = None
+        det_cfg = DetectionConfig(no_reference_mode="auto")
+
+    true_area = float(gt[0]["true_area_visible_px"])
+    gx, gy = gt[0]["center"]
+
+    res_off = run_full_pipeline(
+        test_image=test_img,
+        reference_image=ref_img,
+        det_config=det_cfg,
+        measurement_config=MeasurementConfig(refine_measurements=False),
+    )
+    res_on = run_full_pipeline(
+        test_image=test_img,
+        reference_image=ref_img,
+        det_config=det_cfg,
+        measurement_config=MeasurementConfig(refine_measurements=True),
+    )
+
+    assert len(res_off.measurements) == 1
+    assert len(res_on.measurements) == 1
+    m_off = res_off.measurements[0]
+    m_on = res_on.measurements[0]
+
+    err_off = abs(m_off.area_px - true_area) / true_area
+    err_on = abs(m_on.area_px - true_area) / true_area
+    cent_err_on = math.hypot(m_on.centroid[0] - gx, m_on.centroid[1] - gy)
+
+    assert err_on <= 0.08, f"{path_mode}: refined area error {err_on * 100:.1f}% exceeded 8%"
+    assert cent_err_on <= 0.5, f"{path_mode}: refined centroid error {cent_err_on:.2f} px exceeded 0.5 px"
+    assert err_on < err_off, f"{path_mode}: refinement did not improve area error ({err_on:.3f} vs {err_off:.3f})"
+    assert m_on.detected_area_px == m_off.area_px
+
+
+def test_end_to_end_refinement_scratch_self_reference_full_pipeline():
+    """Verify full default pipeline half-max refinement on a scratch crossing die streets (no reference).
+
+    Stated tolerances (taken from docs/measurement_accuracy.md for scratch T=5, contrast=60):
+      - area relative error vs true_area_visible_px <= 5% (measured P90: 0.0%)
+      - length relative error vs true_length_px <= 20% (measured P90: 8.8% - 18.2%)
+      - centroid error <= 1.5 px (measured P90: 0.86 - 0.92 px)
+    """
+    defect = {
+        "type": "scratch",
+        "start": (195.0, 290.0),
+        "end": (255.0, 320.0),
+        "width": 5,
+        "contrast": 60.0,
+    }
+    test_img, gt = generate_synthetic_wafer(
+        size=512, seed=7602, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=[defect]
+    )
+
+    res = run_full_pipeline(
+        test_image=test_img,
+        reference_image=None,
+        det_config=DetectionConfig(no_reference_mode="auto"),
+        measurement_config=MeasurementConfig(refine_measurements=True),
+    )
+
+    assert res.detection.path == "self_reference"
+    assert len(res.measurements) == 1
+    m = res.measurements[0]
+
+    true_area = float(gt[0]["true_area_visible_px"])
+    true_len = float(gt[0]["true_length_px"])
+    gx, gy = gt[0]["center"]
+
+    area_err = abs(m.area_px - true_area) / true_area
+    len_err = abs(m.length_px - true_len) / true_len
+    cent_err = math.hypot(m.centroid[0] - gx, m.centroid[1] - gy)
+
+    assert area_err <= 0.05, f"Scratch refined area error {area_err * 100:.1f}% exceeded 5%"
+    assert len_err <= 0.20, f"Scratch refined length error {len_err * 100:.1f}% exceeded 20%"
+    assert cent_err <= 1.5, f"Scratch refined centroid error {cent_err:.2f} px exceeded 1.5 px"
+    assert m.detected_area_px > 0

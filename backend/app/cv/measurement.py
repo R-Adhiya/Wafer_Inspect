@@ -31,7 +31,7 @@ _DETECTED_BY_PHRASE: Dict[str, str] = {
 
 
 class MeasurementConfig(BaseModel):
-    """Configuration for defect measurement and optional physical calibration."""
+    """Configuration for defect measurement, half-max boundary refinement, and optional calibration."""
 
     pixel_size_um: Optional[float] = Field(
         default=None,
@@ -40,6 +40,19 @@ class MeasurementConfig(BaseModel):
             "Optional spatial calibration in micrometres per original image pixel. "
             "When None, measurements are reported strictly in uncalibrated image pixels."
         ),
+    )
+    refine_measurements: bool = Field(
+        default=True,
+        description=(
+            "Refine each accepted region's boundary using local half-maximum thresholding (0.5 * P) "
+            "on the exact unshifted difference image before measuring area, perimeter, centroid, and minAreaRect."
+        ),
+    )
+    refine_pad_px: int = Field(
+        default=6,
+        ge=1,
+        le=32,
+        description="Local window padding in pixels around each region bbox during half-max refinement.",
     )
 
 
@@ -56,6 +69,7 @@ class RegionMeasurement:
 
     id: int
     area_px: int
+    detected_area_px: int
     bbox: Tuple[int, int, int, int]  # (x, y, width, height) in original image pixels
     width_px: int
     height_px: int
@@ -77,6 +91,180 @@ class RegionMeasurement:
     area_um2: Optional[float] = None
     length_um: Optional[float] = None
     thickness_um: Optional[float] = None
+
+
+def refine_region_mask(
+    region: Region,
+    exact_difference: np.ndarray,
+    wafer_mask: Optional[np.ndarray] = None,
+    pad_px: int = 6,
+) -> Region:
+    """Refine a detected region's binary mask by local half-maximum edge localisation.
+
+    WHY half-maximum (0.5 * P) edge localisation:
+    Upstream denoising (Gaussian blur), morphological opening, and 3x3 shift-tolerant
+    self-reference differencing systematically erode, notch, or shrink a defect's binary
+    detection mask, causing large area underestimation (especially on small discs and
+    scratches crossing die streets). For a step edge blurred by a symmetric PSF, the 50%
+    intensity contour sits directly on the true geometric edge regardless of contrast.
+    Evaluating `0.5 * P` (where `P` is the mean of the top 10% exact difference values
+    inside the detection mask) on the EXACT unshifted difference image recovers the true
+    spatial extent without inflating background noise.
+
+    Residual error on very thin lines (thickness 1-3 px):
+    When a scratch is narrower than or comparable to the 3x3 denoising PSF (~2-3 px FWHM),
+    smoothing both attenuates the line's peak intensity `P` and spreads energy laterally.
+    Half-maximum thresholding therefore still carries a systematic +1 to +2 px thickness
+    bias (and proportional area overestimation) on 2-3 px thin lines. This is a physical
+    resolution limit of pre-smoothed imagery, not a threshold bug.
+
+    Does not mutate inputs.
+
+    Args:
+        region: Accepted Region from detection/segmentation (in processed coordinates).
+        exact_difference: 2D uint8 exact absolute difference image (for self-reference,
+                          the unshifted |test - ref| WITHOUT the 3x3 shift tolerance).
+        wafer_mask: Optional 2D uint8 wafer domain mask for clipping and rim edge flags.
+        pad_px: Padding around the region's bounding box in processed pixels (default 6).
+
+    Returns:
+        A new Region carrying the refined mask, bbox, area_px, centroid, contours, and
+        touches_edge flag while preserving id, polarity, contrast stats, and scale_factor.
+    """
+    img_h, img_w = exact_difference.shape[:2]
+    x, y, w, h = region.bbox
+
+    wx0 = max(0, x - pad_px)
+    wy0 = max(0, y - pad_px)
+    wx1 = min(img_w, x + w + pad_px)
+    wy1 = min(img_h, y + h + pad_px)
+    win_h = wy1 - wy0
+    win_w = wx1 - wx0
+
+    if win_h <= 0 or win_w <= 0:
+        return region
+
+    # Place original detection mask into the local window
+    det_local = np.zeros((win_h, win_w), dtype=bool)
+    det_local[y - wy0 : y - wy0 + h, x - wx0 : x - wx0 + w] = region.mask
+
+    diff_local = exact_difference[wy0:wy1, wx0:wx1]
+    det_vals = diff_local[det_local].astype(np.float32)
+    if det_vals.size == 0:
+        return region
+
+    # P = mean of the top 10% of exact difference values inside the detection mask
+    k_top = max(1, int(math.ceil(0.10 * det_vals.size)))
+    if k_top >= det_vals.size:
+        peak_mean = float(np.mean(det_vals))
+    else:
+        top_vals = np.partition(det_vals, det_vals.size - k_top)[det_vals.size - k_top :]
+        peak_mean = float(np.mean(top_vals))
+
+    if peak_mean <= 1e-6:
+        return region
+
+    half_max = 0.5 * peak_mean
+    cand_bool = diff_local.astype(np.float32) >= half_max
+
+    wafer_local: Optional[np.ndarray] = None
+    if wafer_mask is not None:
+        wafer_local = wafer_mask[wy0:wy1, wx0:wx1] > 0
+        cand_bool = cand_bool & wafer_local
+
+    # Keep connected component(s) overlapping the original detection mask
+    cand_u8 = cand_bool.astype(np.uint8) * 255
+    num_labels, labels = cv2.connectedComponents(cand_u8, connectivity=8)
+    overlapping_labels = set(np.unique(labels[det_local]).tolist())
+    overlapping_labels.discard(0)
+
+    if not overlapping_labels:
+        return region
+
+    kept_u8 = np.isin(labels, list(overlapping_labels)).astype(np.uint8) * 255
+
+    # Fill interior holes cleanly via RETR_EXTERNAL contours, then re-clip to wafer_mask
+    ext_contours, _ = cv2.findContours(kept_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled_u8 = np.zeros_like(kept_u8)
+    if ext_contours:
+        cv2.drawContours(filled_u8, ext_contours, -1, 255, thickness=cv2.FILLED)
+    else:
+        filled_u8 = kept_u8
+
+    if wafer_local is not None:
+        filled_u8 = np.where(wafer_local, filled_u8, 0).astype(np.uint8)
+
+    ys_loc, xs_loc = np.nonzero(filled_u8)
+    if xs_loc.size == 0:
+        return region
+
+    rx_loc = int(xs_loc.min())
+    ry_loc = int(ys_loc.min())
+    rw = int(xs_loc.max()) - rx_loc + 1
+    rh = int(ys_loc.max()) - ry_loc + 1
+    rx = wx0 + rx_loc
+    ry = wy0 + ry_loc
+
+    refined_crop_bool = (filled_u8[ry_loc : ry_loc + rh, rx_loc : rx_loc + rw] > 0).copy()
+    refined_area_px = int(xs_loc.size)
+    refined_cx = round(float(np.mean(xs_loc)) + wx0, 2)
+    refined_cy = round(float(np.mean(ys_loc)) + wy0, 2)
+
+    # Extract external contours in global processed coordinates
+    crop_u8 = refined_crop_bool.astype(np.uint8) * 255
+    cnts, _ = cv2.findContours(crop_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    all_contours: List[List[Tuple[int, int]]] = []
+    if cnts:
+        for cnt in sorted(cnts, key=cv2.contourArea, reverse=True):
+            pts = [(int(pt[0][0]) + rx, int(pt[0][1]) + ry) for pt in cnt]
+            if pts:
+                all_contours.append(pts)
+    primary_contour = all_contours[0] if all_contours else []
+
+    # Re-evaluate edge contact on the refined mask
+    if wafer_mask is not None:
+        k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        eroded_w = cv2.erode(wafer_mask[ry : ry + rh, rx : rx + rw], k3)
+        rim_crop = (wafer_mask[ry : ry + rh, rx : rx + rw] > 0) & (eroded_w == 0)
+        touches_edge = bool(
+            np.any(refined_crop_bool & rim_crop)
+            or rx == 0
+            or ry == 0
+            or (rx + rw) >= img_w
+            or (ry + rh) >= img_h
+        )
+    else:
+        touches_edge = bool(rx == 0 or ry == 0 or (rx + rw) >= img_w or (ry + rh) >= img_h)
+
+    return Region(
+        id=region.id,
+        bbox=(rx, ry, rw, rh),
+        area_px=refined_area_px,
+        centroid=(refined_cx, refined_cy),
+        mask=refined_crop_bool,
+        contour=primary_contour,
+        polarity=region.polarity,
+        mean_contrast=region.mean_contrast,
+        peak_contrast=region.peak_contrast,
+        touches_edge=touches_edge,
+        scale_factor=region.scale_factor,
+        decision=region.decision,
+        decision_reason=region.decision_reason,
+        contours=all_contours,
+    )
+
+
+def refine_regions(
+    regions: List[Region],
+    exact_difference: np.ndarray,
+    wafer_mask: Optional[np.ndarray] = None,
+    pad_px: int = 6,
+) -> List[Region]:
+    """Apply local half-maximum mask refinement to all accepted defect regions."""
+    return [
+        refine_region_mask(r, exact_difference=exact_difference, wafer_mask=wafer_mask, pad_px=pad_px)
+        for r in regions
+    ]
 
 
 def _compute_oriented_box_metrics(
@@ -188,14 +376,16 @@ def measure_region(
     noise_sigma: float,
     detected_by: DetectedByPath,
     config: Optional[MeasurementConfig] = None,
+    detected_area_proc_px: Optional[int] = None,
 ) -> RegionMeasurement:
     """Compute full original-pixel measurements for a single accepted defect Region.
 
     Args:
-        region: Segmented Region object (in processed-image coordinates with scale_factor).
+        region: Segmented (or half-max refined) Region object in processed-image coordinates.
         noise_sigma: MAD-based difference-image noise sigma from detection.
         detected_by: Detection path name ("golden", "self_reference", or "background").
         config: Optional MeasurementConfig providing pixel_size_um for physical units.
+        detected_area_proc_px: Optional pre-refinement detected pixel count in processed coordinates.
 
     Returns:
         RegionMeasurement with all geometric, oriented, photometric, and calibration metrics.
@@ -209,6 +399,8 @@ def measure_region(
 
     # Map area (x 1/scale^2) and bbox/centroid (x 1/scale) back to original image pixels
     area_px = int(round(float(region.area_px) / (scale * scale)))
+    raw_det_area = region.area_px if detected_area_proc_px is None else detected_area_proc_px
+    detected_area_px = int(round(float(raw_det_area) / (scale * scale)))
     orig_bbox, orig_centroid = map_region_to_original_coords(region.bbox, region.centroid, scale)
     orig_x, orig_y, orig_w, orig_h = orig_bbox
 
@@ -245,6 +437,7 @@ def measure_region(
     return RegionMeasurement(
         id=region.id,
         area_px=area_px,
+        detected_area_px=detected_area_px,
         bbox=(orig_x, orig_y, orig_w, orig_h),
         width_px=orig_w,
         height_px=orig_h,
@@ -273,11 +466,23 @@ def measure_regions(
     noise_sigma: float,
     detected_by: DetectedByPath,
     config: Optional[MeasurementConfig] = None,
+    detected_regions: Optional[List[Region]] = None,
 ) -> List[RegionMeasurement]:
     """Measure all accepted defect regions in original-image pixel coordinates."""
     if config is None:
         config = MeasurementConfig()
+    det_area_by_id = (
+        {r.id: r.area_px for r in detected_regions}
+        if detected_regions is not None
+        else {}
+    )
     return [
-        measure_region(region=r, noise_sigma=noise_sigma, detected_by=detected_by, config=config)
+        measure_region(
+            region=r,
+            noise_sigma=noise_sigma,
+            detected_by=detected_by,
+            config=config,
+            detected_area_proc_px=det_area_by_id.get(r.id),
+        )
         for r in regions
     ]

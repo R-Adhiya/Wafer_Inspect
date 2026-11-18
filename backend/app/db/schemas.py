@@ -52,6 +52,10 @@ class InspectionRunRequest(BaseModel):
         default=None,
         description="Optional overrides for SeverityConfig",
     )
+    pattern_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional overrides for PatternConfig",
+    )
 
 
 class ImageStats(BaseModel):
@@ -91,6 +95,7 @@ class AcceptedRegionResponse(BaseModel):
     width_px: int = 0
     height_px: int = 0
     area_px: int
+    detected_area_px: int = 0
     centroid: Tuple[float, float]
     perimeter_px: float = 0.0
     equivalent_diameter_px: float = 0.0
@@ -114,8 +119,28 @@ class AcceptedRegionResponse(BaseModel):
     original_centroid: Optional[Tuple[float, float]] = None
 
 
+class PatternResultResponse(BaseModel):
+    """Wafer-level spatial pattern diagnosis with Monte Carlo significance metrics."""
+
+    type: Literal[
+        "INSUFFICIENT_DATA",
+        "EDGE_RING",
+        "CENTER_CLUSTER",
+        "DONUT",
+        "LOCAL_CLUSTER",
+        "SCRATCH_LINE",
+        "RANDOM_SCATTER",
+    ]
+    confidence: float
+    p_value: Optional[float] = None
+    explanation: str
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    supporting_defect_ids: List[int] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class InspectionSummaryResponse(BaseModel):
-    """Aggregated defect counts, area statistics, prototype severity, and calibration status."""
+    """Aggregated defect counts, area statistics, prototype severity, calibration, and pattern diagnosis."""
 
     defect_count: int
     total_defect_area_px: int
@@ -125,6 +150,7 @@ class InspectionSummaryResponse(BaseModel):
     severity_reason: str
     calibration_status: str
     pixel_size_um: Optional[float] = None
+    pattern: Optional[PatternResultResponse] = None
 
 
 class ModelInfoResponse(BaseModel):
@@ -179,11 +205,13 @@ class InspectionRunResponse(BaseModel):
     bboxes_image_url: Optional[str] = None
     contours_image_url: Optional[str] = None
     final_overlay_image_url: Optional[str] = None
+    pattern_overlay_image_url: Optional[str] = None
     detection: Optional[DetectionSummaryResponse] = None
     stage_counts: List[StageCount] = Field(default_factory=list)
     regions: List[AcceptedRegionResponse] = Field(default_factory=list)
     rejected_regions: List[RejectedRegionResponse] = Field(default_factory=list)
     summary: Optional[InspectionSummaryResponse] = None
     model: Optional[ModelInfoResponse] = None
+    pattern: Optional[PatternResultResponse] = None
     processing_time_s: float = 0.0
     stage_timings_ms: Dict[str, float] = Field(default_factory=dict)

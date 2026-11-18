@@ -13,6 +13,16 @@ When no golden reference wafer is supplied, WaferInspect runs in `no_reference_m
 - **Regular periodic pattern & integer pitch only**: Assumes a uniform rectangular die array with integer pixel pitch `(pitch_x, pitch_y)`. Non-integer/fractional pitches or rotational skew are not resampled; instead, an optional 3×3 shift-tolerance window (enabled by default) absorbs up to ±1 px misregistration at pattern edges at the trade-off of slightly reduced sensitivity to thin features parallel to or crossing high-contrast pattern edges.
 - **Unverifiable border band**: Pixels with fewer than 3 valid in-wafer neighbouring dies are marked unverifiable and explicitly excluded from detection rather than guessed. Both verifiable `coverage` and `unverifiable_fraction` are reported in the detection summary and API response.
 
+## Wafer-Level Spatial Pattern Diagnosis
+
+After measuring and classifying individual defects, WaferInspect runs wafer-level spatial pattern diagnosis (`backend/app/cv/pattern_analysis.py`) on normalized polar defect coordinates `(r = d / R, theta)` mapped back to original image coordinates:
+
+- **Supported patterns**: `EDGE_RING`, `CENTER_CLUSTER`, `DONUT`, `LOCAL_CLUSTER`, `SCRATCH_LINE`, `RANDOM_SCATTER`, and `INSUFFICIENT_DATA`.
+- **Single-defect shape exception**: Fewer than 3 non-elongated defects return `INSUFFICIENT_DATA`, unless a single region has elongation `>= 8.0` and length `>= 15%` of the wafer diameter, which is diagnosed as `SCRATCH_LINE` from shape evidence.
+- **Seeded Monte Carlo significance testing**: For `n >= 3` defects, each spatial test statistic (band fraction + largest empty angular gap, total-least-squares explained variance + span, and Clark-Evans nearest-neighbour ratio `R`) is compared against `2,000` seeded uniform-in-disc random trials. A non-random pattern is reported **only** when both its geometric rule passes and `p_value <= 0.01` (with deterministic tie-break priority `SCRATCH_LINE → EDGE_RING → CENTER_CLUSTER → DONUT → LOCAL_CLUSTER`); otherwise the wafer is reported as `RANDOM_SCATTER` naming the closest candidate pattern and its p-value.
+- **Evidence strength vs. probability**: Reported `confidence = 1 - p_value` is a **rule-based statistical evidence strength**, NOT a calibrated machine-learning probability. Spatial pattern diagnosis never alters inspection severity.
+- **Limits of Monte Carlo diagnosis**: At very low defect counts (e.g. `n = 3`), uniform random placement has non-trivial probability of placing all 3 points inside a single radial band (`0.36^3 ≈ 4.7%` for the outer 20% ring), so the `p <= 0.01` gate deliberately suppresses low-n band calls to avoid false alarms. Full confusion matrices and false-pattern rates are recorded in [`docs/pattern_accuracy.md`](docs/pattern_accuracy.md), and half-maximum measurement refinement errors in [`docs/measurement_accuracy.md`](docs/measurement_accuracy.md).
+
 ## Evaluation Limits
 
 - **Synthetic evaluation only**: All detection, segmentation, fragment-merging, and measurement algorithms were developed and evaluated on a deterministic synthetic wafer generator (`backend/app/utils/synthetic.py`) with exactly periodic dies and integer pixel pitch. See [`docs/accuracy.md`](docs/accuracy.md) for the full 1,800-image benchmark table.

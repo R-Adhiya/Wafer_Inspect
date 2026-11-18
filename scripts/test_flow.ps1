@@ -1,8 +1,9 @@
-# Automated End-to-End Live Flow Verification for WaferInspect (Phase 6)
-# Starts both backend (8000) and frontend (5173), generates a patterned synthetic
-# wafer with 4 injected defects (bright blob, dark blob, scratch crossing streets,
-# rim defect), runs inspection WITHOUT a reference and WITH a reference, and prints
-# the summary, measurement table vs ground truth, stage funnel, and artifact checks.
+# Automated End-to-End Live Flow Verification for WaferInspect (Phase 6B)
+# Starts both backend (8000) and frontend (5173):
+#   1. Runs live flow on all 6 spatial layouts (patterned wafer, NO reference),
+#      printing pattern type, confidence, p-value, explanation, and verifying pattern_overlay.
+#   2. Runs measurement refinement OFF vs ON comparison on the 4-defect patterned wafer
+#      (no-reference and golden) and verifies all 9 image artifact endpoints.
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -11,81 +12,19 @@ $BackendDir = "$ProjectRoot\backend"
 $FrontendDir = "$ProjectRoot\frontend"
 $PythonExe = "$ProjectRoot\venv\Scripts\python.exe"
 
-Write-Host "============================================================"
-Write-Host "WaferInspect Phase 6: Full-Stack Live Inspection Verification"
-Write-Host "============================================================"
+Write-Host "================================================================="
+Write-Host "WaferInspect Phase 6B: Full-Stack Live Verification (6 Layouts)"
+Write-Host "================================================================="
 
 $TempRef = "$ScriptDir\temp_ref_wafer.png"
 $TempTest = "$ScriptDir\temp_test_wafer_4defects.png"
+$TempLayout = "$ScriptDir\temp_layout_wafer.png"
 $TempGt = "$ScriptDir\temp_gt_4defects.json"
 $PayloadFile = "$ScriptDir\temp_payload.json"
 $TempOut = "$ScriptDir\temp_artifact.png"
 
-function Show-MeasurementComparison {
-    param(
-        [string]$RunLabel,
-        $RunJson,
-        $GtList
-    )
-    $s = $RunJson.summary
-    $m = $RunJson.model
-    Write-Host "`n--- Summary ($RunLabel) ---"
-    Write-Host ("Model: {0} v{1} ({2}) | Processing Time: {3} s" -f $m.name, $m.version, $m.detection_method, $RunJson.processing_time_s)
-    Write-Host ("Defects: {0} | Total Area: {1} px | Largest: {2} px | Average: {3} px | Severity: {4}" -f $s.defect_count, $s.total_defect_area_px, $s.largest_defect_area_px, $s.average_defect_area_px, $s.severity)
-    Write-Host ("Severity Reason: {0}" -f $s.severity_reason)
-    Write-Host ("Calibration: {0}" -f $s.calibration_status)
-
-    Write-Host "`n--- Stage Counts Funnel ($RunLabel) ---"
-    $RunJson.stage_counts | Format-Table -Property stage, candidate_count, note -AutoSize | Out-String | Write-Host
-
-    Write-Host "--- Measurements vs Ground Truth ($RunLabel) ---"
-    $rows = @()
-    foreach ($reg in $RunJson.regions) {
-        $bestGt = $null
-        $bestDist = 1e9
-        foreach ($g in $GtList) {
-            $dx = [double]$reg.centroid[0] - [double]$g.center[0]
-            $dy = [double]$reg.centroid[1] - [double]$g.center[1]
-            $d = [math]::Sqrt($dx * $dx + $dy * $dy)
-            if ($d -lt $bestDist) {
-                $bestDist = $d
-                $bestGt = $g
-            }
-        }
-        $trueDesc = if ($bestGt.type -eq "scratch") {
-            "L=$($bestGt.true_length_px), T=$($bestGt.true_thickness_px), A~$($bestGt.true_area_px)"
-        } else {
-            "D=$($bestGt.true_diameter_px), A=$($bestGt.true_area_px)"
-        }
-        $rows += [PSCustomObject]@{
-            ID        = "#$($reg.id)"
-            GT_Type   = $bestGt.type
-            True_Size = $trueDesc
-            Area_px   = $reg.area_px
-            WxH       = "$($reg.width_px)x$($reg.height_px)"
-            Length    = $reg.length_px
-            Thick     = $reg.thickness_px
-            Perim     = $reg.perimeter_px
-            CNR       = "$($reg.contrast_to_noise)x"
-            Severity  = $reg.severity
-            Rim       = $reg.touches_edge
-            Dist_GT   = [math]::Round($bestDist, 2)
-        }
-    }
-    $rows | Format-Table -AutoSize | Out-String | Write-Host
-
-    foreach ($reg in $RunJson.regions) {
-        Write-Host ("  #{0} [{1}] why_flagged: {2}" -f $reg.id, $reg.severity, $reg.why_flagged)
-    }
-}
-
-# 1. Generate patterned synthetic wafer pair with 4 injected defects + ground truth JSON
-Write-Host "`n[Step 1] Generating patterned synthetic wafer pair (4 injected defects: bright blob, dark blob, scratch crossing streets, rim defect)..."
-& $PythonExe "$ScriptDir\generate_noisy_wafer.py" --pair $TempRef $TempTest --gt $TempGt
-$gtList = Get-Content $TempGt -Raw | ConvertFrom-Json
-
-# 2. Start backend and frontend servers
-Write-Host "`n[Step 2] Launching backend (port 8000) and frontend (port 5173)..."
+# Start backend and frontend servers
+Write-Host "`n[Step 1] Launching backend (port 8000) and frontend (port 5173)..."
 $backendProc = Start-Process -FilePath $PythonExe `
     -ArgumentList "-m uvicorn app.main:app --host 127.0.0.1 --port 8000" `
     -WorkingDirectory $BackendDir `
@@ -102,10 +41,7 @@ try {
         Start-Sleep -Milliseconds 500
         try {
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get -TimeoutSec 2
-            if ($health.status -eq "ok") {
-                $backendReady = $true
-                break
-            }
+            if ($health.status -eq "ok") { $backendReady = $true; break }
         } catch { }
     }
     if (-not $backendReady) { throw "Backend failed to start on http://127.0.0.1:8000/health" }
@@ -116,65 +52,117 @@ try {
         Start-Sleep -Milliseconds 500
         try {
             $feRes = Invoke-WebRequest -Uri "http://127.0.0.1:5173/" -UseBasicParsing -TimeoutSec 2
-            if ($feRes.StatusCode -eq 200) {
-                $frontendReady = $true
-                break
-            }
+            if ($feRes.StatusCode -eq 200) { $frontendReady = $true; break }
         } catch { }
     }
     Write-Host "Frontend ready on http://127.0.0.1:5173 (HTTP 200: $frontendReady)"
 
-    # 3. Live Flow A: Patterned 4-defect wafer WITHOUT Reference (die-to-die self-reference)
-    Write-Host "`n============================================================"
-    Write-Host "[Step 3] Live Flow A: WITHOUT Reference (Self-Reference)"
-    Write-Host "============================================================"
-    $uploadNoRef = curl.exe -s -F "test_image=@$TempTest" http://127.0.0.1:8000/inspection/upload
-    $uploadIdNoRef = ($uploadNoRef | ConvertFrom-Json).upload_id
-    Write-Host "Uploaded no-reference session ID: $uploadIdNoRef"
+    # -----------------------------------------------------------------
+    # Step 2: Live Flow for ALL 6 Spatial Layouts (patterned, NO ref)
+    # -----------------------------------------------------------------
+    Write-Host "`n================================================================="
+    Write-Host "[Step 2] Live Flow: All 6 Spatial Layouts (Patterned, No Ref)"
+    Write-Host "================================================================="
 
-    @{ upload_id = $uploadIdNoRef } | ConvertTo-Json | Set-Content $PayloadFile -Encoding utf8
-    $runNoRef = curl.exe -s -X POST http://127.0.0.1:8000/inspection/run `
-        -H "Content-Type: application/json" `
-        --data-binary "@$PayloadFile"
-    $runNoRefJson = $runNoRef | ConvertFrom-Json
+    $layouts = @("random", "edge_ring", "center_cluster", "donut", "scratch_line", "local_cluster")
+    $layoutSummary = @()
+    $lastUploadId = $null
 
-    $det = $runNoRefJson.detection
-    Write-Host "Path: $($det.path) | Label: $($det.label)"
-    Write-Host "Die Pitch: ($($det.die_pitch -join ', ')) px | Peak Strength: $($det.peak_strength) | Coverage: $([math]::Round($det.coverage * 100, 2))%"
-    Show-MeasurementComparison -RunLabel "No-Reference / Self-Reference" -RunJson $runNoRefJson -GtList $gtList
+    foreach ($lay in $layouts) {
+        & $PythonExe "$ScriptDir\generate_noisy_wafer.py" --layout $lay $TempLayout | Out-Null
+        $upRes = curl.exe -s -F "test_image=@$TempLayout" http://127.0.0.1:8000/inspection/upload | ConvertFrom-Json
+        $uid = $upRes.upload_id
+        $lastUploadId = $uid
 
-    # 4. Live Flow B: Same patterned 4-defect wafer WITH Reference (golden comparison)
-    Write-Host "`n============================================================"
-    Write-Host "[Step 4] Live Flow B: WITH Reference (Golden Comparison)"
-    Write-Host "============================================================"
-    $uploadGolden = curl.exe -s -F "test_image=@$TempTest" -F "reference_image=@$TempRef" http://127.0.0.1:8000/inspection/upload
-    $uploadIdGolden = ($uploadGolden | ConvertFrom-Json).upload_id
-    Write-Host "Uploaded golden session ID: $uploadIdGolden"
+        @{ upload_id = $uid } | ConvertTo-Json | Set-Content $PayloadFile -Encoding utf8
+        $runJson = curl.exe -s -X POST http://127.0.0.1:8000/inspection/run `
+            -H "Content-Type: application/json" `
+            --data-binary "@$PayloadFile" | ConvertFrom-Json
 
-    @{ upload_id = $uploadIdGolden } | ConvertTo-Json | Set-Content $PayloadFile -Encoding utf8
-    $runGolden = curl.exe -s -X POST http://127.0.0.1:8000/inspection/run `
-        -H "Content-Type: application/json" `
-        --data-binary "@$PayloadFile"
-    $runGoldenJson = $runGolden | ConvertFrom-Json
+        $pat = $runJson.pattern
+        $ovCode = curl.exe -s -o $TempOut -w "%{http_code}" "http://127.0.0.1:8000/inspection/run/$uid/image/pattern_overlay"
+        if ($ovCode -ne "200") { throw "Expected HTTP 200 for pattern_overlay on $lay, got $ovCode" }
 
-    Write-Host "Path: $($runGoldenJson.detection.path) | Label: $($runGoldenJson.detection.label)"
-    Show-MeasurementComparison -RunLabel "Golden Reference" -RunJson $runGoldenJson -GtList $gtList
+        $confPct = [math]::Round([double]$pat.confidence * 100.0, 1)
+        $pStr = if ($null -ne $pat.p_value) { "{0:F4}" -f [double]$pat.p_value } else { "N/A" }
 
-    # 5. Verify all 8 image endpoints (including final_overlay) and 400 on invalid kind
-    Write-Host "`n--- Image Artifact Endpoints Verification ---"
-    foreach ($kind in @("original", "preprocessed", "difference", "mask", "filtered_mask", "bboxes", "contours", "final_overlay")) {
-        $code = curl.exe -s -o $TempOut -w "%{http_code}" "http://127.0.0.1:8000/inspection/run/$uploadIdGolden/image/$kind"
+        $layoutSummary += [PSCustomObject]@{
+            Layout     = $lay
+            Defects    = $runJson.summary.defect_count
+            Pattern    = $pat.type
+            Conf_Pct   = "$confPct%"
+            p_value    = $pStr
+            Overlay    = "HTTP $ovCode"
+        }
+        Write-Host ("  [{0,-14}] -> {1,-15} (conf={2,5}%, p={3}) | {4}" -f $lay, $pat.type, $confPct, $pStr, $pat.explanation)
+    }
+
+    Write-Host "`n--- 6-Layout Live Flow Summary ---"
+    $layoutSummary | Format-Table -AutoSize | Out-String | Write-Host
+
+    # -----------------------------------------------------------------
+    # Step 3: Measurement Refinement OFF vs ON on 4-Defect Patterned Wafer
+    # -----------------------------------------------------------------
+    Write-Host "================================================================="
+    Write-Host "[Step 3] Measurement Refinement OFF vs ON (4-Defect Wafer)"
+    Write-Host "================================================================="
+    & $PythonExe "$ScriptDir\generate_noisy_wafer.py" --pair $TempRef $TempTest --gt $TempGt
+    $gtList = Get-Content $TempGt -Raw | ConvertFrom-Json
+
+    $upNoRef = curl.exe -s -F "test_image=@$TempTest" http://127.0.0.1:8000/inspection/upload | ConvertFrom-Json
+    $uidNoRef = $upNoRef.upload_id
+
+    @{ upload_id = $uidNoRef; measurement_config = @{ refine_measurements = $false } } | ConvertTo-Json -Depth 4 | Set-Content $PayloadFile -Encoding utf8
+    $runOff = curl.exe -s -X POST http://127.0.0.1:8000/inspection/run -H "Content-Type: application/json" --data-binary "@$PayloadFile" | ConvertFrom-Json
+
+    @{ upload_id = $uidNoRef; measurement_config = @{ refine_measurements = $true } } | ConvertTo-Json -Depth 4 | Set-Content $PayloadFile -Encoding utf8
+    $runOn = curl.exe -s -X POST http://127.0.0.1:8000/inspection/run -H "Content-Type: application/json" --data-binary "@$PayloadFile" | ConvertFrom-Json
+
+    Write-Host "`n--- No-Reference (Self-Reference) Measurement Refinement OFF vs ON ---"
+    $compRows = @()
+    foreach ($regOn in $runOn.regions) {
+        $regOff = $runOff.regions | Where-Object { $_.id -eq $regOn.id } | Select-Object -First 1
+        $bestGt = $null
+        $bestDist = 1e9
+        foreach ($g in $gtList) {
+            $dx = [double]$regOn.centroid[0] - [double]$g.center[0]
+            $dy = [double]$regOn.centroid[1] - [double]$g.center[1]
+            $d = [math]::Sqrt($dx * $dx + $dy * $dy)
+            if ($d -lt $bestDist) { $bestDist = $d; $bestGt = $g }
+        }
+        $trueArea = [double]$bestGt.true_area_visible_px
+        $errOff = [math]::Round([math]::Abs([double]$regOff.area_px - $trueArea) / $trueArea * 100.0, 1)
+        $errOn = [math]::Round([math]::Abs([double]$regOn.area_px - $trueArea) / $trueArea * 100.0, 1)
+        $compRows += [PSCustomObject]@{
+            ID        = "#$($regOn.id)"
+            GT_Type   = $bestGt.type
+            True_Area = $bestGt.true_area_visible_px
+            Area_OFF  = $regOff.area_px
+            Err_OFF   = "$errOff%"
+            Area_ON   = $regOn.area_px
+            Err_ON    = "$errOn%"
+            Det_Area  = $regOn.detected_area_px
+            Length_ON = $regOn.length_px
+            Thick_ON  = $regOn.thickness_px
+        }
+    }
+    $compRows | Format-Table -AutoSize | Out-String | Write-Host
+
+    # Verify all 9 image artifact endpoints + 400 on invalid kind
+    Write-Host "--- All 9 Image Artifact Endpoints Verification ---"
+    foreach ($kind in @("original", "preprocessed", "difference", "mask", "filtered_mask", "bboxes", "contours", "final_overlay", "pattern_overlay")) {
+        $code = curl.exe -s -o $TempOut -w "%{http_code}" "http://127.0.0.1:8000/inspection/run/$uidNoRef/image/$kind"
         $size = (Get-Item $TempOut).Length
         Write-Host "  GET /image/$kind -> HTTP $code ($size bytes)"
         if ($code -ne "200") { throw "Expected 200 for $kind, got $code" }
     }
-    $badCode = curl.exe -s -o NUL -w "%{http_code}" "http://127.0.0.1:8000/inspection/run/$uploadIdGolden/image/invalid_kind"
+    $badCode = curl.exe -s -o NUL -w "%{http_code}" "http://127.0.0.1:8000/inspection/run/$uidNoRef/image/invalid_kind"
     Write-Host "  GET /image/invalid_kind -> HTTP $badCode (expected 400)"
     if ($badCode -ne "400") { throw "Expected 400 for invalid_kind, got $badCode" }
 
-    Write-Host "`n============================================================"
-    Write-Host "Phase 6 Full-Stack Live Inspection Verification PASSED!"
-    Write-Host "============================================================"
+    Write-Host "`n================================================================="
+    Write-Host "Phase 6B Full-Stack Live Verification PASSED!"
+    Write-Host "================================================================="
 
 } finally {
     if ($backendProc -and -not $backendProc.HasExited) {
@@ -183,5 +171,5 @@ try {
     if ($frontendProc -and -not $frontendProc.HasExited) {
         taskkill /PID $frontendProc.Id /T /F 2>$null | Out-Null
     }
-    Remove-Item -Force -ErrorAction SilentlyContinue $TempRef, $TempTest, $TempGt, $PayloadFile, $TempOut
+    Remove-Item -Force -ErrorAction SilentlyContinue $TempRef, $TempTest, $TempLayout, $TempGt, $PayloadFile, $TempOut
 }

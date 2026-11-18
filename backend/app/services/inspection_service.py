@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.cv.measurement import MeasurementConfig
 from app.cv.noise_filter import NoiseFilterConfig
+from app.cv.pattern_analysis import PatternConfig
 from app.cv.pipeline import (
     DetectionConfig,
     PreprocessingConfig,
@@ -27,6 +28,7 @@ from app.db.schemas import (
     InspectionRunResponse,
     InspectionSummaryResponse,
     ModelInfoResponse,
+    PatternResultResponse,
     RejectedRegionResponse,
     StageCount,
     StepLogItem,
@@ -41,6 +43,7 @@ ALLOWED_RUN_IMAGE_KINDS = {
     "bboxes",
     "contours",
     "final_overlay",
+    "pattern_overlay",
 }
 
 RESULT_PNG_MAP = {
@@ -51,6 +54,7 @@ RESULT_PNG_MAP = {
     "bboxes": "bboxes.png",
     "contours": "contours.png",
     "final_overlay": "final_overlay.png",
+    "pattern_overlay": "pattern_overlay.png",
 }
 
 MIME_TYPE_MAP = {
@@ -70,6 +74,7 @@ def run_inspection_pipeline(
     noise_filter_overrides: Optional[Dict[str, Any]] = None,
     measurement_overrides: Optional[Dict[str, Any]] = None,
     severity_overrides: Optional[Dict[str, Any]] = None,
+    pattern_overrides: Optional[Dict[str, Any]] = None,
 ) -> InspectionRunResponse:
     """Load uploaded wafer images, execute full CV pipeline, and store run artifacts.
 
@@ -228,7 +233,16 @@ def run_inspection_pipeline(
             detail={"code": "INVALID_CONFIG", "message": f"Invalid severity configuration: {str(exc)}"},
         )
 
-    # 6. Execute full CV pipeline (preprocess -> detect -> merge -> filter -> measure -> classify -> overlays)
+    try:
+        pattern_config = PatternConfig(**pattern_overrides) if pattern_overrides else PatternConfig()
+    except Exception as exc:
+        logger.warning("Invalid pattern config for upload '%s': %s", clean_uuid, str(exc))
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_CONFIG", "message": f"Invalid pattern configuration: {str(exc)}"},
+        )
+
+    # 6. Execute full CV pipeline (preprocess -> detect -> merge -> filter -> refine -> measure -> classify -> pattern -> overlays)
     logger.info("Executing full inspection pipeline for upload_id=%s (has_reference=%s)", clean_uuid, ref_array is not None)
     try:
         pipeline_result = run_full_pipeline(
@@ -239,6 +253,7 @@ def run_inspection_pipeline(
             filter_config=filter_config,
             measurement_config=measurement_config,
             severity_config=severity_config,
+            pattern_config=pattern_config,
         )
     except ReferenceIncompatibleError as exc:
         raise HTTPException(
@@ -270,6 +285,7 @@ def run_inspection_pipeline(
     Image.fromarray(pipeline_result.bboxes_image).save(results_dir / "bboxes.png", format="PNG")
     Image.fromarray(pipeline_result.contours_image).save(results_dir / "contours.png", format="PNG")
     Image.fromarray(pipeline_result.final_overlay_image).save(results_dir / "final_overlay.png", format="PNG")
+    Image.fromarray(pipeline_result.pattern_overlay_image).save(results_dir / "pattern_overlay.png", format="PNG")
 
     # Serialize accepted regions with full original-pixel measurements and severity
     regions_by_id = {r.id: r for r in pipeline_result.accepted_regions}
@@ -283,6 +299,7 @@ def run_inspection_pipeline(
             width_px=m.width_px,
             height_px=m.height_px,
             area_px=m.area_px,
+            detected_area_px=m.detected_area_px,
             centroid=m.centroid,
             perimeter_px=m.perimeter_px,
             equivalent_diameter_px=m.equivalent_diameter_px,
@@ -347,7 +364,8 @@ def run_inspection_pipeline(
         "unverifiable_fraction": det_result.unverifiable_fraction,
     }
 
-    # Save run.json (full config, logs, detection, summary, model, timings, and measurements)
+    # Save run.json (full config, logs, detection, summary, model, pattern, timings, and measurements)
+    pattern_dict = pipeline_result.summary.get("pattern")
     run_meta = {
         "upload_id": clean_uuid,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -357,6 +375,7 @@ def run_inspection_pipeline(
         "noise_filter_config": filter_config.model_dump(),
         "measurement_config": measurement_config.model_dump(),
         "severity_config": severity_config.model_dump(),
+        "pattern_config": pattern_config.model_dump(),
         "noise_sigma": pipeline_result.noise_sigma,
         "derived_min_mean_contrast": pipeline_result.derived_min_mean_contrast,
         "original_stats": original_stats.model_dump(),
@@ -366,6 +385,7 @@ def run_inspection_pipeline(
         "stage_counts": pipeline_result.stage_counts,
         "summary": pipeline_result.summary,
         "model": pipeline_result.model,
+        "pattern": pattern_dict,
         "processing_time_s": pipeline_result.processing_time_s,
         "stage_timings_ms": pipeline_result.stage_timings_ms,
         "regions": accepted_json_records,
@@ -380,6 +400,7 @@ def run_inspection_pipeline(
     stage_counts = [StageCount(**sc) for sc in pipeline_result.stage_counts]
     summary_response = InspectionSummaryResponse(**pipeline_result.summary)
     model_response = ModelInfoResponse(**pipeline_result.model)
+    pattern_response = PatternResultResponse(**pattern_dict) if pattern_dict else None
 
     det_response = DetectionSummaryResponse(
         path=det_result.path,
@@ -412,12 +433,14 @@ def run_inspection_pipeline(
         bboxes_image_url=f"/inspection/run/{clean_uuid}/image/bboxes",
         contours_image_url=f"/inspection/run/{clean_uuid}/image/contours",
         final_overlay_image_url=f"/inspection/run/{clean_uuid}/image/final_overlay",
+        pattern_overlay_image_url=f"/inspection/run/{clean_uuid}/image/pattern_overlay",
         detection=det_response,
         stage_counts=stage_counts,
         regions=accepted_responses,
         rejected_regions=rejected_responses,
         summary=summary_response,
         model=model_response,
+        pattern=pattern_response,
         processing_time_s=pipeline_result.processing_time_s,
         stage_timings_ms=pipeline_result.stage_timings_ms,
     )
