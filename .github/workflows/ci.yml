@@ -67,3 +67,74 @@ jobs:
 
       - name: Build Frontend Application
         run: npm run build
+
+  docker:
+    name: Docker Compose Build & Smoke Test
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Docker images
+        run: docker compose build
+
+      - name: Start Docker Compose (SQLite default)
+        run: docker compose up -d
+
+      - name: Wait for Backend Health (SQLite)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null; then
+              echo "Backend is healthy!"
+              exit 0
+            fi
+            echo "Waiting for backend to become healthy... ($i/30)"
+            sleep 2
+          done
+          echo "Backend failed to become healthy within 60s"
+          docker compose logs
+          exit 1
+
+      - name: Verify Frontend Reverse Proxy
+        run: |
+          curl -sf http://localhost:3000/nginx-health
+          curl -sf http://localhost:3000/api/health
+
+      - name: Run Smoke Test against SQLite
+        run: python scripts/smoke_test.py --base-url http://localhost:8000
+
+      - name: Tear down Docker Compose (SQLite)
+        run: docker compose down -v
+
+      - name: Start Docker Compose (PostgreSQL Profile)
+        env:
+          DATABASE_URL: postgresql+psycopg://waferinspect:waferinspect@database:5432/waferinspect
+        run: docker compose --profile postgres up -d
+
+      - name: Wait for Backend Health (PostgreSQL)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null; then
+              echo "Backend is healthy on PostgreSQL!"
+              exit 0
+            fi
+            echo "Waiting for backend to become healthy... ($i/30)"
+            sleep 2
+          done
+          echo "Backend failed to become healthy within 60s on PostgreSQL"
+          docker compose --profile postgres logs
+          exit 1
+
+      - name: Run Smoke Test against PostgreSQL
+        run: python scripts/smoke_test.py --base-url http://localhost:8000
+
+      - name: Tear down Docker Compose (PostgreSQL)
+        run: docker compose --profile postgres down -v
+
