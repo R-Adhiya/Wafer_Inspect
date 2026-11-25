@@ -28,3 +28,25 @@ Because the uncapped 4096×4096 self-reference run exceeded 15 s, `Preprocessing
 
 - **golden (4096×4096)**: uncapped median `3.18 s` (peak `544.9 MB`, mean area error `0.00%`) vs `max_side=2048` (`scale=0.5`) median `1.04 s` (peak `388.4 MB`, mean area error `0.93%`).
 - **self_reference (4096×4096)**: uncapped median `16.02 s` (peak `2530.1 MB`, mean area error `0.00%`) vs `max_side=2048` (`scale=0.5`) median `3.36 s` (peak `632.5 MB`, mean area error `0.89%`).
+
+## 8192×8192 Memory & Dimension Limit Policy
+
+Measured in isolated Python subprocesses with a 180s hard timeout (validation + full pipeline downscaled to default `max_side=2048` via `scale=0.25`):
+
+| Image Mode | Size | Validation Time (s) | Pipeline Time (s) | Total Time (s) | `tracemalloc` Peak (MB) | Windows `peak_wset` (MB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Grayscale | 8192×8192 | 0.181 | 7.583 | 7.764 | 1458.10 | 1660.96 (~1.62 GB) |
+| RGB | 8192×8192 | 0.568 | 14.187 | 14.755 | 1921.16 | **2327.62 (~2.27 GB)** |
+
+### `MAX_IMAGE_DIMENSION` Policy
+Because peak process memory (`peak_wset`) for an 8192×8192 RGB image reaches **2327.62 MB** (exceeding the 2 GB operating ceiling), the default `MAX_IMAGE_DIMENSION` is set to **`4096`** px (and `MAX_IMAGE_PIXELS = 16777216`), keeping process memory comfortably under 1 GB.
+
+Images exceeding `4096×4096` are rejected at the upload validation boundary with HTTP 422:
+```json
+{
+  "detail": {
+    "code": "DIMENSIONS_TOO_LARGE",
+    "message": "Image dimensions (8192x8192) exceed maximum allowed (4096x4096)."
+  }
+}
+```

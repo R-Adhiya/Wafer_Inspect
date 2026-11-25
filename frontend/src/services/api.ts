@@ -435,7 +435,6 @@ export async function getInspectionById(inspectionId: number): Promise<Inspectio
   }
   return response.json();
 }
-
 /**
  * Fetches available image artifact URLs for an inspection (GET /inspection/{id}/images).
  */
@@ -449,7 +448,6 @@ export async function getInspectionImages(inspectionId: number): Promise<Inspect
   }
   return response.json();
 }
-
 /**
  * Polls live single-process stage status by integer inspection ID (GET /inspection/{id}/status).
  */
@@ -463,7 +461,6 @@ export async function getInspectionStatusById(inspectionId: number): Promise<Ins
   }
   return response.json();
 }
-
 /**
  * Lists paginated, searchable, filterable, and sortable inspection history.
  */
@@ -489,7 +486,6 @@ export async function getInspectionHistory(
   }
   return response.json();
 }
-
 /**
  * Deletes an inspection and its stored upload/result artifacts (DELETE /inspection/{id}).
  */
@@ -503,7 +499,6 @@ export async function deleteInspection(inspectionId: number): Promise<DeleteInsp
   }
   return response.json();
 }
-
 /**
  * Fetches SQL-aggregated dashboard KPIs and chart data (GET /dashboard/stats).
  */
@@ -517,7 +512,6 @@ export async function getDashboardStats(): Promise<DashboardStatsResponse> {
   }
   return response.json();
 }
-
 /**
  * Lists synthetic demonstration wafer samples (GET /samples).
  */
@@ -531,7 +525,6 @@ export async function getSamples(): Promise<SampleListResponse> {
   }
   return response.json();
 }
-
 /**
  * Generates and uploads a synthetic demonstration sample through the standard upload path (POST /samples/{name}).
  */
@@ -545,7 +538,6 @@ export async function createSampleUpload(name: string): Promise<UploadInspection
   }
   return response.json();
 }
-
 /**
  * Resolves a backend-relative URL (such as `/inspection/5/image/final_overlay`) against API_BASE_URL.
  */
@@ -597,4 +589,113 @@ export async function getInspectionStatus(uploadId: string): Promise<InspectionS
  */
 export function getRunImageUrl(uploadId: string, kind: RunImageKind): string {
   return `${API_BASE_URL}/inspection/run/${encodeURIComponent(uploadId)}/image/${kind}`;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9: Noise Filtering Experiment & Sweep Types and API Clients
+// ---------------------------------------------------------------------------
+
+export interface NoiseExperimentCase {
+  stage_id: number;
+  stage_name: string;
+  label: string;
+  candidate_count: number;
+  tp?: number | null;
+  fp?: number | null;
+  fn?: number | null;
+  precision?: number | null;
+  recall?: number | null;
+}
+
+export interface InspectionNoiseExperimentResponse {
+  inspection_id: number;
+  upload_id: string;
+  has_ground_truth: boolean;
+  ground_truth_count?: number | null;
+  tolerance_px: number;
+  cases: NoiseExperimentCase[];
+  summary: string;
+  disclaimer?: string | null;
+}
+
+export interface NoiseSweepCaseSummary {
+  stage_id: number;
+  stage_name: string;
+  label: string;
+  mean_count: number;
+  std_count: number;
+  mean_precision: number;
+  std_precision: number;
+  mean_recall: number;
+  std_recall: number;
+  mean_tp: number;
+  mean_fp: number;
+  mean_fn: number;
+}
+
+export interface NoiseSweepPoint {
+  noise_level: number;
+  seed_count: number;
+  cases: NoiseSweepCaseSummary[];
+  summary?: string | null;
+}
+
+export interface NoiseSweepRequest {
+  layout?: string;
+  path?: 'golden' | 'self_reference';
+  noise_levels?: number[];
+  seeds?: number[];
+  size?: number;
+  tolerance_px?: number;
+  defect_count?: number;
+}
+
+export interface NoiseSweepResponse {
+  layout: string;
+  path: string;
+  size: number;
+  noise_levels: number[];
+  seeds: number[];
+  true_defect_count: number;
+  series: NoiseSweepPoint[];
+  summary: string;
+  disclaimer: string;
+}
+
+/**
+ * Fetches four-stage noise filtering evaluation for an individual inspection (GET /inspection/{id}/noise-experiment).
+ */
+export async function getInspectionNoiseExperiment(
+  inspectionId: number
+): Promise<InspectionNoiseExperimentResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/inspection/${encodeURIComponent(inspectionId)}/noise-experiment`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
+}
+/**
+ * Executes multi-seed noise sweep across Gaussian noise sigma levels (POST /experiments/noise-sweep).
+ */
+export async function runNoiseSweep(
+  request: NoiseSweepRequest = {}
+): Promise<NoiseSweepResponse> {
+  const response = await fetch(`${API_BASE_URL}/experiments/noise-sweep`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  return response.json();
 }

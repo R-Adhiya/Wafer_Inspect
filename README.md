@@ -50,6 +50,25 @@ WaferInspect persists inspections, defects, and processing run configurations vi
      ```
 - **Synthetic Demonstration Seeding**: Run `python scripts/seed_demo_data.py` to execute 16 varied synthetic demonstration wafers through the real CV pipeline and persist them into the database for the Dashboard and History views.
 
+## API & Legacy Route Deprecation
+
+- **Database-Backed Endpoints**: All primary inspection inspection workflows use the RESTful integer-id endpoints: `GET /inspection/{id}`, `GET /inspection/{id}/defects`, `GET /inspection/{id}/images`, `GET /inspection/{id}/image/{kind}`, `GET /inspection/{id}/status`, `GET /inspection/history`, and `DELETE /inspection/{id}`.
+- **Deprecated Legacy Routes**: The legacy UUID-based routes (`GET /inspection/run/{upload_id}/image/{kind}`, `GET /inspection/run/{upload_id}/result`, and `GET /inspection/run/{upload_id}/status`) are retained for backwards compatibility with earlier API clients, but are marked `deprecated=True` in the OpenAPI schema.
+
+## Why Noise Filtering Matters
+
+Defect detection on patterned semiconductor wafers operates near the sensor noise floor. In empirical sweeps across Gaussian noise levels $\sigma \in [2.0, 20.0]$ gray levels ([`docs/noise_experiment.md`](docs/noise_experiment.md)), raw difference thresholding (Stage 1) produces an immediate surge in false detections as noise grows:
+- **Golden Reference Subtraction**: At $\sigma = 2.0$, raw detection yields $8.0 \pm 0.0$ candidates (100% precision). By $\sigma = 10.0$, raw candidates explode to $66.8 \pm 39.7$ candidates (precision drops to 17.1%, with $58.8$ false alarms per wafer).
+- **Self-Reference (Die-to-Die)**: At $\sigma = 2.0$, raw detection produces $13.4 \pm 3.1$ candidates (62.8% precision). At $\sigma = 15.0$, raw candidates surge to $59.2 \pm 8.5$ (13.8% precision, with $51.2$ false alarms per wafer).
+
+WaferInspect addresses this with a four-stage hierarchical filtering pipeline:
+1. **Raw Detection**: Identifies all connected components exceeding thresholding.
+2. **Minimum-Area Filtering** ($\ge 12\text{ px}$): Eliminates single-pixel and microscopic noise specks, reducing candidate counts by up to 88% at $\sigma = 10.0$.
+3. **Morphological Regularization** (opening + closing): Disconnects false bridges across repetitive die texture patterns and eliminates filament noise artifacts.
+4. **Contrast-to-Noise Gating** ($CNR \ge k \cdot \sigma$): Statistically verifies candidate prominence against local wafer substrate texture, restoring **100.0% precision** across normal operational noise ($\sigma \le 10.0$ gray levels) with zero false positives.
+
+For complete empirical data and sweep methodology, see [`docs/noise_experiment.md`](docs/noise_experiment.md) and execute `scripts/run_noise_experiment.py`.
+
 ## Scripts & Utilities
 
 - `scripts/generate_noisy_wafer.py`: Generates synthetic wafer test images (512x512 grayscale) via `backend/app/utils/synthetic.py`, simulating silicon wafer substrate disks, die grids or circuit block tiles, additive Gaussian sensor noise, and illumination gradients.

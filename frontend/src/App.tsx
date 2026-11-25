@@ -4,6 +4,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { NewInspectionPage } from './pages/NewInspectionPage';
 import { InspectionReportPage } from './pages/InspectionReportPage';
+import { NoiseExperimentPage } from './pages/NoiseExperimentPage';
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/inspection/new" element={<NewInspectionPage />} />
             <Route path="/inspection/:id" element={<InspectionReportPage />} />
+            <Route path="/experiments/noise" element={<NoiseExperimentPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

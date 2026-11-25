@@ -133,23 +133,26 @@ def list_samples() -> SampleListResponse:
     )
 
 
-def _generate_sample_arrays(name: str, seed_offset: int = 0) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-    """Deterministically generate (test_array, optional_ref_array) for a named sample."""
+def _generate_sample_arrays(
+    name: str,
+    seed_offset: int = 0,
+) -> Tuple[np.ndarray, Optional[np.ndarray], List[Dict[str, Any]]]:
+    """Deterministically generate (test_array, optional_ref_array, ground_truth) for a named sample."""
     seed = 4000 + seed_offset
 
     if name == "clean":
-        img, _ = generate_synthetic_wafer(size=512, seed=seed + 1, grid_pitch=32, die_pattern="grid", noise_std=5.0)
-        return img, None
+        img, gt = generate_synthetic_wafer(size=512, seed=seed + 1, grid_pitch=32, die_pattern="grid", noise_std=5.0)
+        return img, None, gt
 
     if name == "bright_defect":
         defects = [{"type": "bright_blob", "center": (220.0, 210.0), "radius": 9.0, "contrast": 70.0}]
-        img, _ = generate_synthetic_wafer(size=512, seed=seed + 2, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
-        return img, None
+        img, gt = generate_synthetic_wafer(size=512, seed=seed + 2, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
+        return img, None, gt
 
     if name == "dark_defect":
         defects = [{"type": "dark_blob", "center": (300.0, 290.0), "radius": 10.0, "contrast": -70.0}]
-        img, _ = generate_synthetic_wafer(size=512, seed=seed + 3, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
-        return img, None
+        img, gt = generate_synthetic_wafer(size=512, seed=seed + 3, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
+        return img, None, gt
 
     if name == "multiple_defects":
         defects = [
@@ -158,36 +161,36 @@ def _generate_sample_arrays(name: str, seed_offset: int = 0) -> Tuple[np.ndarray
             {"type": "scratch", "start": (190.0, 315.0), "end": (260.0, 345.0), "width": 3, "contrast": 70.0},
             {"type": "bright_blob", "center": (472.0, 256.0), "radius": 10.0, "contrast": 65.0},
         ]
-        ref_img, test_img, _ = create_standard_synthetic_pair(size=512, seed=seed + 4, defects=defects, grid_pitch=32, die_pattern="grid")
-        return test_img, ref_img
+        ref_img, test_img, gt = create_standard_synthetic_pair(size=512, seed=seed + 4, defects=defects, grid_pitch=32, die_pattern="grid")
+        return test_img, ref_img, gt
 
     if name == "scratch":
         defects = [{"type": "scratch", "start": (175.0, 215.0), "end": (325.0, 295.0), "width": 4, "contrast": 75.0}]
-        img, _ = generate_synthetic_wafer(size=512, seed=seed + 5, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
-        return img, None
+        img, gt = generate_synthetic_wafer(size=512, seed=seed + 5, grid_pitch=32, die_pattern="grid", noise_std=5.0, defects=defects)
+        return img, None, gt
 
     if name == "edge_ring":
-        img, _, _ = generate_layout_wafer("edge_ring", count=8, size=512, seed=seed + 6, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
-        return img, None
+        img, gt, _ = generate_layout_wafer("edge_ring", count=8, size=512, seed=seed + 6, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
+        return img, None, gt
 
     if name == "center_cluster":
-        img, _, _ = generate_layout_wafer("center_cluster", count=8, size=512, seed=seed + 7, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
-        return img, None
+        img, gt, _ = generate_layout_wafer("center_cluster", count=8, size=512, seed=seed + 7, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
+        return img, None, gt
 
     if name == "donut":
-        img, _, _ = generate_layout_wafer("donut", count=8, size=512, seed=seed + 8, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
-        return img, None
+        img, gt, _ = generate_layout_wafer("donut", count=8, size=512, seed=seed + 8, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
+        return img, None, gt
 
     if name == "local_cluster":
-        img, _, _ = generate_layout_wafer("local_cluster", count=8, size=512, seed=seed + 9, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
-        return img, None
+        img, gt, _ = generate_layout_wafer("local_cluster", count=8, size=512, seed=seed + 9, grid_pitch=32, die_pattern="grid", radius=7.0, contrast=65.0)
+        return img, None, gt
 
     if name == "noise_only":
-        img, _ = generate_synthetic_wafer(size=512, seed=seed + 10, grid_pitch=32, die_pattern="grid", noise_std=10.0, defects=None)
-        return img, None
+        img, gt = generate_synthetic_wafer(size=512, seed=seed + 10, grid_pitch=32, die_pattern="grid", noise_std=10.0, defects=None)
+        return img, None, gt
 
     if name == "illumination_gradient":
-        img, _ = generate_synthetic_wafer(
+        img, gt = generate_synthetic_wafer(
             size=512,
             seed=seed + 11,
             grid_pitch=32,
@@ -197,10 +200,10 @@ def _generate_sample_arrays(name: str, seed_offset: int = 0) -> Tuple[np.ndarray
             gradient_strength=40.0,
             defects=None,
         )
-        return img, None
+        return img, None, gt
 
     if name == "high_res_2048":
-        img, _, _ = generate_layout_wafer(
+        img, gt, _ = generate_layout_wafer(
             "edge_ring",
             count=8,
             size=2048,
@@ -211,7 +214,7 @@ def _generate_sample_arrays(name: str, seed_offset: int = 0) -> Tuple[np.ndarray
             radius=24.0,
             contrast=65.0,
         )
-        return img, None
+        return img, None, gt
 
     raise HTTPException(
         status_code=404,
@@ -243,7 +246,7 @@ async def create_sample_upload(
             },
         )
 
-    test_arr, ref_arr = _generate_sample_arrays(clean_name, seed_offset=seed_offset)
+    test_arr, ref_arr, gt = _generate_sample_arrays(clean_name, seed_offset=seed_offset)
     test_fname = filename_override or f"synthetic_demo_{clean_name}.png"
     test_file = _array_to_upload_file(test_arr, filename=test_fname)
     ref_file = _array_to_upload_file(ref_arr, filename=f"synthetic_demo_{clean_name}_ref.png") if ref_arr is not None else None
@@ -253,4 +256,5 @@ async def create_sample_upload(
         reference_image_file=ref_file,
         db=db,
         disclaimer=SYNTHETIC_DISCLAIMER,
+        ground_truth=gt,
     )

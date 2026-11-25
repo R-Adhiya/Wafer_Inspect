@@ -359,3 +359,102 @@ class SampleListResponse(BaseModel):
 
     disclaimer: str = "Synthetic demonstration image"
     samples: List[SampleItemResponse]
+
+
+class NoiseExperimentCaseResponse(BaseModel):
+    """Candidate metrics at a single stage of the four-stage noise filtering process."""
+
+    stage_id: int
+    stage_name: str
+    label: str
+    candidate_count: int
+    tp: Optional[int] = None
+    fp: Optional[int] = None
+    fn: Optional[int] = None
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+
+
+class InspectionNoiseExperimentResponse(BaseModel):
+    """Four-stage noise filtering evaluation for an individual inspection run."""
+
+    inspection_id: int
+    upload_id: str
+    has_ground_truth: bool
+    ground_truth_count: Optional[int] = None
+    tolerance_px: float = 15.0
+    cases: List[NoiseExperimentCaseResponse]
+    summary: str
+    disclaimer: Optional[str] = None
+
+
+class NoiseSweepCaseSummaryResponse(BaseModel):
+    """Aggregated statistics across random seeds for a single filter stage at a given noise level."""
+
+    stage_id: int
+    stage_name: str
+    label: str
+    mean_count: float
+    std_count: float
+    mean_precision: float
+    std_precision: float
+    mean_recall: float
+    std_recall: float
+    mean_tp: float
+    mean_fp: float
+    mean_fn: float
+
+
+class NoiseSweepPointResponse(BaseModel):
+    """Sweep evaluation point for a specific Gaussian noise sigma."""
+
+    noise_level: float
+    seed_count: int
+    cases: List[NoiseSweepCaseSummaryResponse]
+    summary: Optional[str] = None
+
+
+class NoiseSweepRequest(BaseModel):
+    """Request payload for synchronous POST /experiments/noise-sweep."""
+
+    layout: str = Field(default="edge_ring", description="Defect layout pattern")
+    path: Literal["golden", "self_reference"] = Field(
+        default="self_reference", description="Detection path"
+    )
+    noise_levels: Optional[List[float]] = Field(
+        default=None, description="Gaussian noise sigma levels (<= 8)"
+    )
+    seeds: Optional[List[int]] = Field(
+        default=None, description="Random seeds per level (<= 10)"
+    )
+    size: int = Field(default=512, description="Wafer image dimension (<= 1024)")
+    tolerance_px: float = Field(default=15.0, description="Centroid match tolerance")
+    defect_count: int = Field(default=8, description="Target defect count")
+
+    @model_validator(mode="after")
+    def _validate_caps(self) -> "NoiseSweepRequest":
+        levels = self.noise_levels if self.noise_levels is not None else [2.0, 5.0, 10.0, 15.0, 20.0]
+        seed_list = self.seeds if self.seeds is not None else [42, 43, 44, 45, 46]
+        if len(levels) > 8:
+            raise ValueError(f"Too many noise levels: requested {len(levels)}, maximum allowed is 8.")
+        if len(seed_list) > 10:
+            raise ValueError(f"Too many seeds: requested {len(seed_list)}, maximum allowed is 10.")
+        if self.size > 1024:
+            raise ValueError(f"Image dimension ({self.size}) exceeds maximum allowed sweep size (1024).")
+        if self.size < 64:
+            raise ValueError(f"Image dimension ({self.size}) must be at least 64.")
+        return self
+
+
+class NoiseSweepResponse(BaseModel):
+    """Response contract for POST /experiments/noise-sweep."""
+
+    layout: str
+    path: str
+    size: int
+    noise_levels: List[float]
+    seeds: List[int]
+    true_defect_count: int
+    series: List[NoiseSweepPointResponse]
+    summary: str
+    disclaimer: str = "Synthetic demonstration data"

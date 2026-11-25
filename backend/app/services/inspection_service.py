@@ -44,6 +44,7 @@ from app.db.schemas import (
     HistoryListResponse,
     ImageStats,
     InspectionImagesResponse,
+    InspectionNoiseExperimentResponse,
     InspectionRunResponse,
     InspectionStatusResponse,
     InspectionSummaryResponse,
@@ -756,6 +757,28 @@ def run_inspection_pipeline(
             with open(results_dir / "run.json", "w", encoding="utf-8") as f:
                 json.dump(run_meta, f, indent=2)
 
+            # 10. Compute and cache four-stage noise experiment evaluation
+            try:
+                meta_path = upload_dir / "meta.json"
+                gt_spec = None
+                if meta_path.is_file():
+                    with open(meta_path, "r", encoding="utf-8") as mf:
+                        m_data = json.load(mf)
+                        gt_spec = m_data.get("ground_truth")
+
+                from app.cv.noise_experiment import evaluate_inspection_noise_experiment
+                noise_data = evaluate_inspection_noise_experiment(
+                    result=pipeline_result,
+                    min_area_px=filter_config.min_area_px,
+                    ground_truth=gt_spec,
+                )
+                noise_data["inspection_id"] = int(saved_row.id)
+                noise_data["upload_id"] = clean_uuid
+                with open(results_dir / "noise_experiment.json", "w", encoding="utf-8") as nef:
+                    json.dump(noise_data, nef, indent=2)
+            except Exception as exp_err:
+                logger.warning("Failed to save noise_experiment.json for upload_id=%s: %s", clean_uuid, exp_err)
+
             status_store.complete_run(clean_uuid)
             logger.info(
                 "Inspection pipeline completed and persisted: inspection_id=%s, upload_id=%s",
@@ -935,6 +958,105 @@ def get_inspection_status_by_id(db: Session, inspection_id: int) -> InspectionSt
         error=None,
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
     )
+
+
+def get_inspection_noise_experiment_by_id(
+    db: Session, inspection_id: int
+) -> InspectionNoiseExperimentResponse:
+    """Return four-stage noise experiment candidate metrics for a completed inspection."""
+    try:
+        row = crud.get_inspection(db, inspection_id)
+    except SQLAlchemyError as exc:
+        raise _db_error_http("get_inspection_noise_experiment", exc)
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "INSPECTION_NOT_FOUND", "message": f"Inspection '{inspection_id}' was not found."},
+        )
+
+    if row.status in ("pending", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RUN_NOT_FINISHED",
+                "message": f"Inspection '{inspection_id}' has status '{row.status}' and has not finished yet.",
+            },
+        )
+    if row.status == "failed":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RUN_FAILED",
+                "message": row.error_message or "Inspection failed during processing.",
+            },
+        )
+
+    results_dir = settings.results_path / row.upload_id
+    noise_json_path = results_dir / "noise_experiment.json"
+    if noise_json_path.is_file():
+        try:
+            with open(noise_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                data["inspection_id"] = int(row.id)
+                data["upload_id"] = row.upload_id
+                return InspectionNoiseExperimentResponse.model_validate(data)
+        except Exception as exc:
+            logger.warning("Could not read cached noise_experiment.json for %s: %s", row.upload_id, exc)
+
+    # Re-evaluate from stored images and metadata
+    upload_dir = settings.upload_path / row.upload_id
+    if not upload_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "UPLOAD_NOT_FOUND", "message": f"Upload session '{row.upload_id}' was not found."},
+        )
+
+    test_files = [f for f in upload_dir.glob("test.*") if f.suffix.lower() in MIME_TYPE_MAP]
+    if not test_files or not test_files[0].is_file():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TEST_IMAGE_NOT_FOUND", "message": "Uploaded test image file is missing."},
+        )
+
+    test_img = np.array(Image.open(test_files[0]))
+    ref_files = [f for f in upload_dir.glob("reference.*") if f.suffix.lower() in MIME_TYPE_MAP]
+    ref_img = np.array(Image.open(ref_files[0])) if ref_files and ref_files[0].is_file() else None
+
+    gt_spec = None
+    meta_path = upload_dir / "meta.json"
+    if meta_path.is_file():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as mf:
+                m_data = json.load(mf)
+                gt_spec = m_data.get("ground_truth")
+        except Exception:
+            gt_spec = None
+
+    from app.cv.noise_experiment import run_single_noise_evaluation
+
+    det_cfg = DetectionConfig(
+        path="golden" if ref_img is not None else "self_reference",
+        no_reference_mode="self_reference",
+    )
+    res = run_single_noise_evaluation(
+        test_image=test_img,
+        reference_image=ref_img,
+        det_config=det_cfg,
+        ground_truth=gt_spec,
+    )
+    res["inspection_id"] = int(row.id)
+    res["upload_id"] = row.upload_id
+
+    # Cache for future calls
+    try:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        with open(noise_json_path, "w", encoding="utf-8") as f:
+            json.dump(res, f, indent=2)
+    except Exception as exc:
+        logger.warning("Failed to cache noise_experiment.json: %s", exc)
+
+    return InspectionNoiseExperimentResponse.model_validate(res)
 
 
 def list_inspection_history(

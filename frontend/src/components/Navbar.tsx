@@ -49,6 +49,18 @@ export const Navbar: React.FC = () => {
             History
           </NavLink>
           <NavLink
+            to="/experiments/noise"
+            className={({ isActive }) =>
+              `px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                isActive
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`
+            }
+          >
+            Noise Experiment
+          </NavLink>
+          <NavLink
             to="/inspection/new"
             className={({ isActive }) =>
               `px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${

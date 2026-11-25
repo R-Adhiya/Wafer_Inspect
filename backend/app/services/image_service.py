@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -30,6 +30,7 @@ async def process_and_store_upload(
     reference_image_file: Optional[UploadFile] = None,
     db: Optional[Session] = None,
     disclaimer: Optional[str] = None,
+    ground_truth: Optional[List[Dict[str, Any]]] = None,
 ) -> UploadInspectionResponse:
     """Validate uploaded images and persist them safely under data/uploads/<upload_id>/."""
     # 1. Validate test image (required)
@@ -106,6 +107,9 @@ async def process_and_store_upload(
             else None
         ),
         "reference_warning": reference_warning,
+        "is_synthetic": (disclaimer is not None) or (ground_truth is not None),
+        "disclaimer": disclaimer,
+        "ground_truth": ground_truth,
     }
     meta_path = upload_dir / "meta.json"
     with open(meta_path, "w", encoding="utf-8") as f:

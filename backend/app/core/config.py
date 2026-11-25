@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "data/uploads"
     RESULTS_DIR: str = "data/results"
     MIN_IMAGE_DIMENSION: int = 64
-    MAX_IMAGE_DIMENSION: int = 8192
-    MAX_IMAGE_PIXELS: int = 67108864  # 8192 * 8192
+    MAX_IMAGE_DIMENSION: int = 4096
+    MAX_IMAGE_PIXELS: int = 16777216  # 4096 * 4096 (lowered from 8192 to guarantee peak process memory < 2 GB)
 
     @property
     def upload_path(self) -> Path:

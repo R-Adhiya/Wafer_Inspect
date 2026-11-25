@@ -13,6 +13,7 @@ import { DefectTable } from '../components/DefectTable';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { InspectionDetailsCard } from '../components/InspectionDetailsCard';
 import { InspectionSummary } from '../components/InspectionSummary';
+import { NoiseFilteringCard } from '../components/NoiseFilteringCard';
 import { PatternCard } from '../components/PatternCard';
 import { PipelineTrace } from '../components/PipelineTrace';
 import { ProcessingStatus } from '../components/ProcessingStatus';
@@ -223,7 +224,12 @@ export const InspectionReportPage: React.FC = () => {
           imageUrls={imageUrls}
         />
 
-        {/* 5. Pipeline Interpretability Trace */}
+        {/* 5. Noise Filtering Card */}
+        {result.inspection_id != null && (
+          <NoiseFilteringCard inspectionId={result.inspection_id} />
+        )}
+
+        {/* 6. Pipeline Interpretability Trace */}
         <PipelineTrace
           uploadId={result.upload_id}
           stageCounts={result.stage_counts}

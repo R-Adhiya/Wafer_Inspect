@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import dashboard, inspection, samples
+from app.api.routes import dashboard, experiments, inspection, samples
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.db.database import engine
@@ -80,3 +80,4 @@ def get_health() -> Dict[str, str]:
 app.include_router(inspection.router)
 app.include_router(dashboard.router)
 app.include_router(samples.router)
+app.include_router(experiments.router)

@@ -516,6 +516,7 @@ def create_standard_synthetic_pair(
     defects: Optional[List[Dict[str, Any]]] = None,
     grid_pitch: int = 32,
     die_pattern: Literal["grid", "circuit"] = "grid",
+    noise_std: float = 5.0,
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """Create a matching synthetic golden reference and test image pair.
 
@@ -529,6 +530,7 @@ def create_standard_synthetic_pair(
         defects: List of synthetic defects injected into the test image.
         grid_pitch: Die pitch in pixels (default 32).
         die_pattern: Repeating die pattern style ("grid" or "circuit").
+        noise_std: Standard deviation of Gaussian sensor noise.
 
     Returns:
         Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
@@ -543,6 +545,7 @@ def create_standard_synthetic_pair(
         defects=None,
         die_pattern=die_pattern,
         pattern_seed=seed,
+        noise_std=noise_std,
     )
 
     # Test image with defects (same pattern layout, independent noise realization)
@@ -554,6 +557,7 @@ def create_standard_synthetic_pair(
         defects=defects,
         die_pattern=die_pattern,
         pattern_seed=seed,
+        noise_std=noise_std,
     )
 
     # Apply translation if requested

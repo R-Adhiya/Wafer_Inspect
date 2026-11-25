@@ -15,6 +15,7 @@ from app.db.schemas import (
     DeleteInspectionResponse,
     HistoryListResponse,
     InspectionImagesResponse,
+    InspectionNoiseExperimentResponse,
     InspectionRunRequest,
     InspectionRunResponse,
     InspectionStatusResponse,
@@ -26,6 +27,7 @@ from app.services.inspection_service import (
     get_inspection_defects_by_id,
     get_inspection_image_file_by_id,
     get_inspection_images_by_id,
+    get_inspection_noise_experiment_by_id,
     get_inspection_report_by_id,
     get_inspection_result,
     get_inspection_status,
@@ -105,23 +107,23 @@ def get_inspection_history(
     )
 
 
-# Legacy upload_id run routes retained for backward compatibility with Phases 3-7 API consumers
-@router.get("/run/{upload_id}/image/{kind}")
+# Legacy upload_id run routes retained for backward compatibility with Phases 3-7 API consumers (deprecated in OpenAPI)
+@router.get("/run/{upload_id}/image/{kind}", deprecated=True)
 def get_run_image(upload_id: str, kind: str) -> FileResponse:
-    """Serve an image artifact from an inspection run by UUID upload_id."""
+    """Serve an image artifact from an inspection run by UUID upload_id. Deprecated: use /inspection/{id}/image/{kind}."""
     file_path, media_type = get_run_image_file_path(upload_id=upload_id, kind=kind)
     return FileResponse(path=str(file_path), media_type=media_type)
 
 
-@router.get("/run/{upload_id}/result", response_model=InspectionRunResponse)
+@router.get("/run/{upload_id}/result", response_model=InspectionRunResponse, deprecated=True)
 def get_run_result(upload_id: str, db: Session = Depends(get_db)) -> InspectionRunResponse:
-    """Return completed inspection result by UUID upload_id (404 unknown, 409 unfinished)."""
+    """Return completed inspection result by UUID upload_id (404 unknown, 409 unfinished). Deprecated: use /inspection/{id}."""
     return get_inspection_result(upload_id=upload_id, db=db)
 
 
-@router.get("/run/{upload_id}/status", response_model=InspectionStatusResponse)
+@router.get("/run/{upload_id}/status", response_model=InspectionStatusResponse, deprecated=True)
 def get_run_status(upload_id: str) -> InspectionStatusResponse:
-    """Return live single-process in-memory stage status by UUID upload_id."""
+    """Return live single-process in-memory stage status by UUID upload_id. Deprecated: use /inspection/{id}/status."""
     return get_inspection_status(upload_id=upload_id)
 
 
@@ -171,6 +173,15 @@ def get_inspection_status_route(
 ) -> InspectionStatusResponse:
     """Return live single-process stage status for an inspection by integer ID."""
     return get_inspection_status_by_id(db=db, inspection_id=inspection_id)
+
+
+@router.get("/{inspection_id}/noise-experiment", response_model=InspectionNoiseExperimentResponse)
+def get_inspection_noise_experiment(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+) -> InspectionNoiseExperimentResponse:
+    """Return four-stage noise experiment candidate metrics for a completed inspection."""
+    return get_inspection_noise_experiment_by_id(db=db, inspection_id=inspection_id)
 
 
 @router.delete("/{inspection_id}", response_model=DeleteInspectionResponse)
