@@ -1,12 +1,9 @@
 """Tests for Phase 3: CV Preprocessing algorithms, pipeline execution, and API endpoints."""
 
 import io
-from pathlib import Path
-from fastapi.testclient import TestClient
+
 import numpy as np
 import pytest
-from PIL import Image
-
 from app.core.config import settings
 from app.cv.pipeline import run_preprocessing
 from app.cv.preprocessing import (
@@ -20,6 +17,8 @@ from app.cv.preprocessing import (
     verify_tiling_coverage,
 )
 from app.main import app
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 

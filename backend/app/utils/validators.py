@@ -5,8 +5,10 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Optional
+
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
+
 from app.core.config import settings
 from app.core.logging import logger
 

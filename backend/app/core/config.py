@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import List, Union
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,7 +13,6 @@ ROOT_DIR: Path = Path(__file__).resolve().parents[3]
 MODEL_NAME: str = "WaferInspect-CV"
 MODEL_VERSION: str = "1.0.0"
 DETECTION_METHOD_LABEL: str = "Classical CV Baseline"
-
 
 
 class Settings(BaseSettings):

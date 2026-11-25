@@ -5,9 +5,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.logging import logger
 from app.db import crud
@@ -34,16 +36,12 @@ async def process_and_store_upload(
 ) -> UploadInspectionResponse:
     """Validate uploaded images and persist them safely under data/uploads/<upload_id>/."""
     # 1. Validate test image (required)
-    validated_test: ValidatedImage = await validate_uploaded_image(
-        test_image_file, field_name="test_image"
-    )
+    validated_test: ValidatedImage = await validate_uploaded_image(test_image_file, field_name="test_image")
 
     # 2. Validate reference image (optional)
     validated_ref: Optional[ValidatedImage] = None
     if reference_image_file is not None and reference_image_file.filename:
-        validated_ref = await validate_uploaded_image(
-            reference_image_file, field_name="reference_image"
-        )
+        validated_ref = await validate_uploaded_image(reference_image_file, field_name="reference_image")
 
     # 3. Generate UUID4 upload_id and create destination folder
     upload_id = str(uuid.uuid4())
@@ -133,7 +131,9 @@ async def process_and_store_upload(
             status="pending",
         )
     except SQLAlchemyError as exc:
-        logger.error("Database failure creating pending inspection for upload_id=%s: %s", upload_id, str(exc), exc_info=True)
+        logger.error(
+            "Database failure creating pending inspection for upload_id=%s: %s", upload_id, str(exc), exc_info=True
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -188,7 +188,10 @@ def get_image_file_path(upload_id: str, kind: str) -> Tuple[Path, str]:
         logger.warning("Invalid kind requested: %s", kind)
         raise HTTPException(
             status_code=400,
-            detail={"code": "INVALID_KIND", "message": f"Image kind '{kind}' is invalid. Allowed: 'test', 'reference'."},
+            detail={
+                "code": "INVALID_KIND",
+                "message": f"Image kind '{kind}' is invalid. Allowed: 'test', 'reference'.",
+            },
         )
 
     try:
@@ -217,7 +220,10 @@ def get_image_file_path(upload_id: str, kind: str) -> Tuple[Path, str]:
         logger.warning("File for kind '%s' not found in upload '%s'", kind, clean_uuid)
         raise HTTPException(
             status_code=404,
-            detail={"code": "FILE_NOT_FOUND", "message": f"{kind.capitalize()} image not found for upload {clean_uuid}."},
+            detail={
+                "code": "FILE_NOT_FOUND",
+                "message": f"{kind.capitalize()} image not found for upload {clean_uuid}.",
+            },
         )
 
     file_path = target_files[0]

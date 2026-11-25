@@ -13,17 +13,17 @@ Validates:
 """
 
 from io import BytesIO
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
-import pytest
 
+import numpy as np
+import pytest
 from app.cv.detection import estimate_wafer_mask
 from app.cv.noise_filter import NoiseFilterConfig
 from app.cv.pipeline import DetectionConfig, run_detection, run_full_pipeline
 from app.cv.self_reference import build_self_reference, estimate_die_pitch
 from app.main import app
 from app.utils.synthetic import generate_synthetic_wafer
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 

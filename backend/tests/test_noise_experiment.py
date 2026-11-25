@@ -3,22 +3,20 @@
 from io import BytesIO
 from pathlib import Path
 from typing import Tuple
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
-import pytest
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
 
+import numpy as np
+import pytest
 from app.cv.noise_experiment import (
     compute_four_cases_from_components,
     match_candidates_to_ground_truth,
     run_noise_sweep,
     run_single_noise_evaluation,
 )
-from app.cv.noise_filter import NoiseFilterConfig
 from app.utils.synthetic import generate_layout_wafer
-
+from fastapi.testclient import TestClient
+from PIL import Image
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker
 
 # ---------------------------------------------------------------------------
 # 1. Pure Matching Logic Tests with Hand-Built Ground Truth
@@ -103,6 +101,7 @@ def test_stage_filtering_candidate_monotonicity() -> None:
     c4 = cases[3]["candidate_count"]
 
     assert c2 <= c1, f"Min-area candidate count ({c2}) cannot exceed raw count ({c1})"
+    assert c3 <= c1, f"Morphology count ({c3}) cannot exceed raw count ({c1})"
     assert c4 <= c1, f"Final filtered count ({c4}) cannot exceed raw count ({c1})"
     assert eval_res["has_ground_truth"] is True
     assert eval_res["ground_truth_count"] == len(gt)
@@ -110,12 +109,8 @@ def test_stage_filtering_candidate_monotonicity() -> None:
 
 def test_raw_candidates_grow_with_noise() -> None:
     """Verify raw threshold candidates grow significantly as Gaussian noise sigma increases."""
-    img_low, _, _ = generate_layout_wafer(
-        defect_layout="center_cluster", count=8, size=512, seed=77, noise_std=2.0
-    )
-    img_high, _, _ = generate_layout_wafer(
-        defect_layout="center_cluster", count=8, size=512, seed=77, noise_std=15.0
-    )
+    img_low, _, _ = generate_layout_wafer(defect_layout="center_cluster", count=8, size=512, seed=77, noise_std=2.0)
+    img_high, _, _ = generate_layout_wafer(defect_layout="center_cluster", count=8, size=512, seed=77, noise_std=15.0)
 
     res_low = run_single_noise_evaluation(test_image=img_low)
     res_high = run_single_noise_evaluation(test_image=img_high)

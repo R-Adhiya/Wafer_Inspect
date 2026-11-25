@@ -10,9 +10,10 @@ ORIGINAL image pixel coordinates using the Phase 3 resize scale factor:
   - areas    *= 1 / (scale_factor ** 2)
 """
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
+
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field
@@ -228,11 +229,7 @@ def refine_region_mask(
         eroded_w = cv2.erode(wafer_mask[ry : ry + rh, rx : rx + rw], k3)
         rim_crop = (wafer_mask[ry : ry + rh, rx : rx + rw] > 0) & (eroded_w == 0)
         touches_edge = bool(
-            np.any(refined_crop_bool & rim_crop)
-            or rx == 0
-            or ry == 0
-            or (rx + rw) >= img_w
-            or (ry + rh) >= img_h
+            np.any(refined_crop_bool & rim_crop) or rx == 0 or ry == 0 or (rx + rw) >= img_w or (ry + rh) >= img_h
         )
     else:
         touches_edge = bool(rx == 0 or ry == 0 or (rx + rw) >= img_w or (ry + rh) >= img_h)
@@ -263,8 +260,7 @@ def refine_regions(
 ) -> List[Region]:
     """Apply local half-maximum mask refinement to all accepted defect regions."""
     return [
-        refine_region_mask(r, exact_difference=exact_difference, wafer_mask=wafer_mask, pad_px=pad_px)
-        for r in regions
+        refine_region_mask(r, exact_difference=exact_difference, wafer_mask=wafer_mask, pad_px=pad_px) for r in regions
     ]
 
 
@@ -529,11 +525,7 @@ def measure_regions(
     """Measure all accepted defect regions in original-image pixel coordinates."""
     if config is None:
         config = MeasurementConfig()
-    det_area_by_id = (
-        {r.id: r.area_px for r in detected_regions}
-        if detected_regions is not None
-        else {}
-    )
+    det_area_by_id = {r.id: r.area_px for r in detected_regions} if detected_regions is not None else {}
     return [
         measure_region(
             region=r,

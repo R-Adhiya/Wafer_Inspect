@@ -5,6 +5,7 @@ Contains database read/write/aggregate operations only (no CV or HTTP business l
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 from sqlalchemy import asc, case, desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -147,11 +148,7 @@ def get_inspection_by_upload_id(db: Session, upload_id: str) -> Optional[Inspect
 
 def list_defects_for_inspection(db: Session, inspection_id: int) -> List[Defect]:
     """Return ordered Defect rows for a given inspection_id."""
-    stmt = (
-        select(Defect)
-        .where(Defect.inspection_id == inspection_id)
-        .order_by(Defect.region_no.asc(), Defect.id.asc())
-    )
+    stmt = select(Defect).where(Defect.inspection_id == inspection_id).order_by(Defect.region_no.asc(), Defect.id.asc())
     return list(db.execute(stmt).scalars().all())
 
 
@@ -245,11 +242,7 @@ def get_dashboard_stats(db: Session) -> Dict[str, Any]:
     avg_defect_area = float(db.execute(avg_area_stmt).scalar_one() or 0.0)
 
     # 2. 5 most recent inspections
-    recent_5_stmt = (
-        select(Inspection)
-        .order_by(Inspection.created_at.desc(), Inspection.id.desc())
-        .limit(5)
-    )
+    recent_5_stmt = select(Inspection).order_by(Inspection.created_at.desc(), Inspection.id.desc()).limit(5)
     recent_5 = list(db.execute(recent_5_stmt).scalars().all())
 
     # 3. Defect counts for the last 20 inspections (oldest -> newest for chart readability)
@@ -283,9 +276,7 @@ def get_dashboard_stats(db: Session) -> Dict[str, Any]:
         .group_by(Inspection.severity)
     )
     sev_map = {str(sev): int(cnt) for sev, cnt in db.execute(sev_stmt).all() if sev is not None}
-    severity_distribution = [
-        {"severity": sev, "count": sev_map.get(sev, 0)} for sev in SEVERITY_ORDER
-    ]
+    severity_distribution = [{"severity": sev, "count": sev_map.get(sev, 0)} for sev in SEVERITY_ORDER]
 
     # 5. Pattern-type distribution via GROUP BY
     pat_stmt = (
@@ -295,9 +286,7 @@ def get_dashboard_stats(db: Session) -> Dict[str, Any]:
         .order_by(func.count(Inspection.id).desc(), Inspection.pattern_type.asc())
     )
     pattern_distribution = [
-        {"pattern_type": str(pat), "count": int(cnt)}
-        for pat, cnt in db.execute(pat_stmt).all()
-        if pat is not None
+        {"pattern_type": str(pat), "count": int(cnt)} for pat, cnt in db.execute(pat_stmt).all() if pat is not None
     ]
 
     # 6. Defect-area histogram bins via SQL CASE aggregation
@@ -310,10 +299,7 @@ def get_dashboard_stats(db: Session) -> Dict[str, Any]:
     )
     hist_stmt = select(bucket_expr.label("bucket"), func.count(Defect.id)).group_by(bucket_expr)
     hist_map = {str(b): int(cnt) for b, cnt in db.execute(hist_stmt).all()}
-    defect_area_histogram = [
-        {"bin": label, "count": hist_map.get(label, 0)}
-        for label, _, _ in AREA_HISTOGRAM_BINS
-    ]
+    defect_area_histogram = [{"bin": label, "count": hist_map.get(label, 0)} for label, _, _ in AREA_HISTOGRAM_BINS]
 
     return {
         "total_inspections": int(total_inspections or 0),

@@ -1,7 +1,7 @@
 """Tests for the health check endpoint."""
 
-from fastapi.testclient import TestClient
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

@@ -7,14 +7,15 @@ SQLite and PostgreSQL without SQLite-only constructs.
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
 )
@@ -83,9 +84,7 @@ class Inspection(Base):
     detection_method: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     processing_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), index=True, nullable=False, default=_utc_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now, onupdate=_utc_now
     )
@@ -184,8 +183,6 @@ class ProcessingRun(Base):
     config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
     stage_timings: Mapped[Dict[str, float]] = mapped_column(JSON, nullable=False)
     processing_time: Mapped[float] = mapped_column(Float, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utc_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
 
     inspection: Mapped["Inspection"] = relationship("Inspection", back_populates="processing_runs")

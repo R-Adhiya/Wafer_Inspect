@@ -6,6 +6,7 @@ same migration script rather than maintaining a separate `create_all` code path.
 
 from pathlib import Path
 from typing import Optional
+
 from alembic import command
 from alembic.config import Config
 from sqlalchemy.engine import Connection

@@ -4,10 +4,11 @@ Implements the multi-stage image preprocessing, classical defect detection,
 connected-component segmentation, noise filtering, and comprehensive step logging.
 """
 
-from dataclasses import dataclass
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
@@ -790,7 +791,9 @@ def run_full_pipeline(
         merge_gap_px=det_config.merge_gap_px,
     )
     stage_timings_ms["segmentation_and_merge"] = round((time.perf_counter() - t0) * 1000.0, 2)
-    logger.info("Candidate regions after fragment merge (radius=%d px): %d", det_config.merge_gap_px, len(candidate_regions))
+    logger.info(
+        "Candidate regions after fragment merge (radius=%d px): %d", det_config.merge_gap_px, len(candidate_regions)
+    )
 
     morph_count = det_result.stage_counts[-1]["candidate_count"] if det_result.stage_counts else len(candidate_regions)
     merged_count = len(candidate_regions)
@@ -867,9 +870,7 @@ def run_full_pipeline(
         wafer_area_proc_px = int(preprocessed_test.size)
     wafer_area_orig_px = float(wafer_area_proc_px) / (scale_factor * scale_factor)
 
-    detected_by: DetectedByPath = (
-        "background" if det_result.path == "no_reference" else det_result.path
-    )
+    detected_by: DetectedByPath = "background" if det_result.path == "no_reference" else det_result.path
     orig_h, orig_w = test_image.shape[:2]
     measurements = measure_regions(
         regions=effective_regions,

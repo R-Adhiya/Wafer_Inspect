@@ -12,9 +12,10 @@ rule passes AND its seeded Monte Carlo `p_value <= p_value_threshold` (default 0
 otherwise the wafer is classified as `RANDOM_SCATTER`.
 """
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field
@@ -241,7 +242,7 @@ def _compute_clark_evans_nn_ratio(pts_xy: np.ndarray, wafer_radius: float) -> fl
     nn_dists = np.min(dist_mat, axis=1)
     obs_mean_nn = float(np.mean(nn_dists))
 
-    wafer_area = math.pi * (wafer_radius ** 2)
+    wafer_area = math.pi * (wafer_radius**2)
     expected_nn = 0.5 / math.sqrt(float(n) / wafer_area)
     return obs_mean_nn / max(expected_nn, 1e-9)
 
@@ -259,7 +260,7 @@ def _compute_radial_bins(r_norm: np.ndarray, num_bins: int = 5) -> List[Dict[str
             obs = int(np.count_nonzero(r_norm >= r0))
         else:
             obs = int(np.count_nonzero((r_norm >= r0) & (r_norm < r1)))
-        area_frac = (r1 ** 2) - (r0 ** 2)
+        area_frac = (r1**2) - (r0**2)
         expected = round(float(n) * area_frac, 2)
         bins.append(
             {
@@ -340,10 +341,7 @@ def _run_monte_carlo_pvalues(
     edge_frac_mc = np.mean(edge_mask, axis=1)
     edge_gap_mc = _mc_largest_angular_gaps_deg(theta_deg, edge_mask)
     edge_hits = int(
-        np.count_nonzero(
-            (edge_frac_mc >= obs_edge_frac - 1e-12)
-            & (edge_gap_mc <= config.max_angular_gap_deg + 1e-12)
-        )
+        np.count_nonzero((edge_frac_mc >= obs_edge_frac - 1e-12) & (edge_gap_mc <= config.max_angular_gap_deg + 1e-12))
     )
     p_edge = (edge_hits + 1.0) / (T + 1.0)
 
@@ -358,8 +356,7 @@ def _run_monte_carlo_pvalues(
     donut_gap_mc = _mc_largest_angular_gaps_deg(theta_deg, donut_mask)
     donut_hits = int(
         np.count_nonzero(
-            (donut_frac_mc >= obs_donut_frac - 1e-12)
-            & (donut_gap_mc <= config.max_angular_gap_deg + 1e-12)
+            (donut_frac_mc >= obs_donut_frac - 1e-12) & (donut_gap_mc <= config.max_angular_gap_deg + 1e-12)
         )
     )
     p_donut = (donut_hits + 1.0) / (T + 1.0)
@@ -372,7 +369,7 @@ def _run_monte_carlo_pvalues(
     sxy = np.sum(cx_mc * cy_mc, axis=1)
 
     trace = sxx + syy
-    disc = np.sqrt(np.maximum(0.0, (sxx - syy) ** 2 + 4.0 * (sxy ** 2)))
+    disc = np.sqrt(np.maximum(0.0, (sxx - syy) ** 2 + 4.0 * (sxy**2)))
     lam1 = 0.5 * (trace + disc)
     ev_mc = np.divide(lam1, np.maximum(trace, 1e-12))
 
@@ -383,10 +380,7 @@ def _run_monte_carlo_pvalues(
     proj = cx_mc * ux + cy_mc * uy
     span_ratio_mc = (np.max(proj, axis=1) - np.min(proj, axis=1)) / 2.0  # unit disc diameter == 2.0
     scratch_hits = int(
-        np.count_nonzero(
-            (ev_mc >= obs_ev - 1e-12)
-            & (span_ratio_mc >= config.scratch_min_span_ratio - 1e-12)
-        )
+        np.count_nonzero((ev_mc >= obs_ev - 1e-12) & (span_ratio_mc >= config.scratch_min_span_ratio - 1e-12))
     )
     p_scratch = (scratch_hits + 1.0) / (T + 1.0)
 
@@ -493,9 +487,9 @@ def analyze_spatial_pattern(
 
     radial_bins = _compute_radial_bins(r_norm, num_bins=config.radial_bins)
 
-    exp_edge_frac = round(1.0 - (config.edge_ring_r_min ** 2), 4)
-    exp_center_frac = round(config.center_cluster_r_max ** 2, 4)
-    exp_donut_frac = round((config.donut_r_max ** 2) - (config.donut_r_min ** 2), 4)
+    exp_edge_frac = round(1.0 - (config.edge_ring_r_min**2), 4)
+    exp_center_frac = round(config.center_cluster_r_max**2, 4)
+    exp_donut_frac = round((config.donut_r_max**2) - (config.donut_r_min**2), 4)
 
     base_metrics: Dict[str, Any] = {
         "n": n,
@@ -504,9 +498,7 @@ def analyze_spatial_pattern(
         "edge_fraction": round(float(np.mean(r_norm >= config.edge_ring_r_min)), 4) if n > 0 else 0.0,
         "center_fraction": round(float(np.mean(r_norm <= config.center_cluster_r_max)), 4) if n > 0 else 0.0,
         "donut_fraction": (
-            round(float(np.mean((r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max))), 4)
-            if n > 0
-            else 0.0
+            round(float(np.mean((r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max))), 4) if n > 0 else 0.0
         ),
         "expected_random_fraction": {
             "edge_ring": exp_edge_frac,
@@ -521,9 +513,7 @@ def analyze_spatial_pattern(
         ),
         "donut_angular_gap_deg": (
             round(
-                _largest_angular_gap_deg(
-                    theta_deg[(r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max)]
-                ),
+                _largest_angular_gap_deg(theta_deg[(r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max)]),
                 2,
             )
             if int(np.count_nonzero((r_norm >= config.donut_r_min) & (r_norm <= config.donut_r_max))) >= 2
@@ -610,19 +600,10 @@ def analyze_spatial_pattern(
     base_metrics["nn_ratio"] = round(nn_ratio, 4)
 
     # Geometric rule checks
-    scratch_rule = (
-        ev >= config.scratch_min_explained_variance
-        and span_ratio >= config.scratch_min_span_ratio
-    )
-    edge_rule = (
-        edge_frac >= config.band_min_fraction
-        and edge_gap <= config.max_angular_gap_deg
-    )
+    scratch_rule = ev >= config.scratch_min_explained_variance and span_ratio >= config.scratch_min_span_ratio
+    edge_rule = edge_frac >= config.band_min_fraction and edge_gap <= config.max_angular_gap_deg
     center_rule = center_frac >= config.band_min_fraction
-    donut_rule = (
-        donut_frac >= config.band_min_fraction
-        and donut_gap <= config.max_angular_gap_deg
-    )
+    donut_rule = donut_frac >= config.band_min_fraction and donut_gap <= config.max_angular_gap_deg
     local_rule = (nn_ratio < config.local_cluster_max_nn_ratio) and (not center_rule)
 
     rules_passed: Dict[str, bool] = {
@@ -858,8 +839,14 @@ def draw_pattern_overlay(
                 if m.id in supp_set:
                     rad = math.radians(m.angle_deg)
                     half_l = m.length_px / 2.0
-                    p1 = (int(round(m.centroid[0] - half_l * math.cos(rad))), int(round(m.centroid[1] - half_l * math.sin(rad))))
-                    p2 = (int(round(m.centroid[0] + half_l * math.cos(rad))), int(round(m.centroid[1] + half_l * math.sin(rad))))
+                    p1 = (
+                        int(round(m.centroid[0] - half_l * math.cos(rad))),
+                        int(round(m.centroid[1] - half_l * math.sin(rad))),
+                    )
+                    p2 = (
+                        int(round(m.centroid[0] + half_l * math.cos(rad))),
+                        int(round(m.centroid[1] + half_l * math.sin(rad))),
+                    )
                     cv2.line(canvas, p1, p2, (220, 38, 38), thickness=2, lineType=cv2.LINE_AA)
 
     # 4. Defect centroids coloured by severity

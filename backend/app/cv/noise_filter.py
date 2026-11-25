@@ -5,9 +5,10 @@ assigns every region an explicit accept or reject decision with a human-readable
 reason string containing the measured values.
 """
 
-from dataclasses import dataclass, field, replace
 import logging
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
+
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field

@@ -5,6 +5,7 @@ and never mutating input arrays.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field, field_validator

@@ -15,10 +15,10 @@ LIMITATIONS:
   (reported via `coverage` and `unverifiable_fraction`).
 """
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import Optional, Tuple
-import cv2
+
 import numpy as np
 
 from app.cv.detection import estimate_noise_sigma
@@ -193,12 +193,7 @@ def estimate_die_pitch(
 
     combined_strength = min(strength_x, strength_y)
 
-    if (
-        pitch_x is None
-        or pitch_y is None
-        or strength_x < min_peak_strength
-        or strength_y < min_peak_strength
-    ):
+    if pitch_x is None or pitch_y is None or strength_x < min_peak_strength or strength_y < min_peak_strength:
         reason = (
             f"not periodic (peak_strength_x={strength_x:.4f} at lag={pitch_x}, "
             f"peak_strength_y={strength_y:.4f} at lag={pitch_y}, "

@@ -1,6 +1,7 @@
 """Pydantic schemas and serialization models."""
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -418,15 +419,9 @@ class NoiseSweepRequest(BaseModel):
     """Request payload for synchronous POST /experiments/noise-sweep."""
 
     layout: str = Field(default="edge_ring", description="Defect layout pattern")
-    path: Literal["golden", "self_reference"] = Field(
-        default="self_reference", description="Detection path"
-    )
-    noise_levels: Optional[List[float]] = Field(
-        default=None, description="Gaussian noise sigma levels (<= 8)"
-    )
-    seeds: Optional[List[int]] = Field(
-        default=None, description="Random seeds per level (<= 10)"
-    )
+    path: Literal["golden", "self_reference"] = Field(default="self_reference", description="Detection path")
+    noise_levels: Optional[List[float]] = Field(default=None, description="Gaussian noise sigma levels (<= 8)")
+    seeds: Optional[List[int]] = Field(default=None, description="Random seeds per level (<= 10)")
     size: int = Field(default=512, description="Wafer image dimension (<= 1024)")
     tolerance_px: float = Field(default=15.0, description="Centroid match tolerance")
     defect_count: int = Field(default=8, description="Target defect count")

@@ -5,6 +5,7 @@ Route ordering note: `/inspection/history` is intentionally registered BEFORE
 """
 
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -89,7 +90,9 @@ def run_inspection(
 def get_inspection_history(
     search: Optional[str] = Query(default=None, description="Case-insensitive filename substring search"),
     severity: Optional[str] = Query(default=None, description="Filter by severity (NONE, LOW, MEDIUM, HIGH)"),
-    sort: str = Query(default="created_at", description="Sort key: created_at, defect_count, severity, processing_time"),
+    sort: str = Query(
+        default="created_at", description="Sort key: created_at, defect_count, severity, processing_time"
+    ),
     order: str = Query(default="desc", description="Sort order: asc or desc"),
     page: int = Query(default=1, ge=1, description="1-based page number"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),

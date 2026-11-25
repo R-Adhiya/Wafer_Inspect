@@ -1,11 +1,11 @@
 """Comprehensive tests for inspection image upload, validation, and retrieval."""
 
 import io
-from pathlib import Path
-from fastapi.testclient import TestClient
-from PIL import Image
+
 from app.core.config import settings
 from app.main import app
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 
@@ -294,4 +294,3 @@ def test_image_larger_than_maximum_dimensions(monkeypatch):
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert detail["code"] == "DIMENSIONS_TOO_LARGE"
-

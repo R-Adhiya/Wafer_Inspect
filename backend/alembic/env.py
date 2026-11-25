@@ -1,20 +1,19 @@
 """Alembic migration environment configured from WaferInspect settings and ORM metadata."""
 
+import sys
 from logging.config import fileConfig
 from pathlib import Path
-import sys
 
 from alembic import context
-from sqlalchemy import pool
 
 # Ensure backend directory is importable regardless of current working directory
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+import app.db.models  # noqa: F401, E402  # Register all ORM models on Base.metadata
 from app.core.config import settings  # noqa: E402
 from app.db.database import Base, build_engine  # noqa: E402
-import app.db.models  # noqa: F401, E402  # Register all ORM models on Base.metadata
 
 config = context.config
 

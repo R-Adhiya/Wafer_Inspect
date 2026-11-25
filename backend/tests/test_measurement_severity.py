@@ -27,21 +27,21 @@ Validates:
    persists them in run.json, serves GET .../image/final_overlay (200 PNG), and returns severity NONE for a clean wafer.
 """
 
-from io import BytesIO
 import json
 import math
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
-import pytest
+from io import BytesIO
 
+import numpy as np
+import pytest
 from app.core.config import DETECTION_METHOD_LABEL, MODEL_NAME, MODEL_VERSION, settings
-from app.cv.measurement import MeasurementConfig, UNCALIBRATED_STATUS
+from app.cv.measurement import UNCALIBRATED_STATUS, MeasurementConfig
 from app.cv.noise_filter import NoiseFilterConfig
 from app.cv.pipeline import DetectionConfig, PreprocessingConfig, run_full_pipeline
 from app.cv.severity import SeverityConfig, assess_inspection_severity, classify_defect_severity
 from app.main import app
 from app.utils.synthetic import create_standard_synthetic_pair, generate_synthetic_wafer
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 
@@ -98,11 +98,13 @@ def test_disc_and_square_measurement_accuracy():
     disc_m = min(result.measurements, key=lambda m: math.hypot(m.centroid[0] - disc_cx, m.centroid[1] - disc_cy))
     sq_m = min(
         result.measurements,
-        key=lambda m: math.hypot(m.centroid[0] - (sq_x + (sq_side - 1) / 2.0), m.centroid[1] - (sq_y + (sq_side - 1) / 2.0)),
+        key=lambda m: math.hypot(
+            m.centroid[0] - (sq_x + (sq_side - 1) / 2.0), m.centroid[1] - (sq_y + (sq_side - 1) / 2.0)
+        ),
     )
 
     # Disc ground truth
-    true_disc_area = math.pi * (disc_r ** 2)
+    true_disc_area = math.pi * (disc_r**2)
     true_disc_diam = 2.0 * disc_r + 1.0  # pixel grid [-14..+14] spans 29 px
     true_disc_perim = 2.0 * math.pi * disc_r
 
@@ -170,15 +172,11 @@ def test_scratch_oriented_length_thickness_angle_and_elongation():
     assert abs(m.length_px - true_length) / true_length <= 0.10, (
         f"Scratch length {m.length_px} outside 10% of {true_length:.2f}"
     )
-    assert abs(m.thickness_px - true_width) <= 2.0, (
-        f"Scratch thickness {m.thickness_px} outside 2 px of {true_width}"
-    )
+    assert abs(m.thickness_px - true_width) <= 2.0, f"Scratch thickness {m.thickness_px} outside 2 px of {true_width}"
     # Angular distance modulo 180 degrees
     raw_angle_diff = abs(m.angle_deg - true_angle)
     angle_diff = min(raw_angle_diff, 180.0 - raw_angle_diff)
-    assert angle_diff <= 5.0, (
-        f"Scratch angle {m.angle_deg} deg outside 5 deg of {true_angle:.2f} deg"
-    )
+    assert angle_diff <= 5.0, f"Scratch angle {m.angle_deg} deg outside 5 deg of {true_angle:.2f} deg"
     assert m.elongation >= 10.0
     assert abs(m.elongation - (m.length_px / m.thickness_px)) <= 0.15
 
@@ -189,7 +187,7 @@ def test_scratch_oriented_length_thickness_angle_and_elongation():
 def test_scale_factor_maps_lengths_and_areas_back_to_original_pixels():
     """Verify resize to scale=0.5 maps lengths (x2) and areas (x4) back to original image pixels."""
     disc_r = 20.0
-    true_orig_area = math.pi * (disc_r ** 2)  # ~1256.6 px
+    true_orig_area = math.pi * (disc_r**2)  # ~1256.6 px
     true_orig_diam = 2.0 * disc_r + 1.0  # 41 px
     defects = [
         {"type": "bright_blob", "center": (256.0, 256.0), "radius": disc_r, "contrast": 75.0},
@@ -258,7 +256,9 @@ def test_severity_classification_config_overrides_escalations_and_none():
     assert "0" in reason_none
 
     # Baseline without escalation: 2 LOW defects -> stays LOW
-    sev_low, reason_low = assess_inspection_severity([50, 60], ["LOW", "LOW"], wafer_area_px=wafer_area, config=default_cfg)
+    sev_low, reason_low = assess_inspection_severity(
+        [50, 60], ["LOW", "LOW"], wafer_area_px=wafer_area, config=default_cfg
+    )
     assert sev_low == "LOW"
     assert "2" in reason_low and "110" in reason_low
 
@@ -365,9 +365,9 @@ def test_why_flagged_contains_measured_contrast_and_detection_path():
 def test_summary_aggregates_and_positive_stage_timings():
     """Verify summary numbers match exact sum/max/mean of regions and timings are populated & positive."""
     defects = [
-        {"type": "bright_blob", "center": (165.0, 175.0), "radius": 5.0, "contrast": 70.0},   # LOW (~78 px)
-        {"type": "dark_blob", "center": (345.0, 185.0), "radius": 9.0, "contrast": -70.0},   # MEDIUM (~254 px)
-        {"type": "bright_blob", "center": (256.0, 340.0), "radius": 14.0, "contrast": 70.0}, # HIGH (~615 px)
+        {"type": "bright_blob", "center": (165.0, 175.0), "radius": 5.0, "contrast": 70.0},  # LOW (~78 px)
+        {"type": "dark_blob", "center": (345.0, 185.0), "radius": 9.0, "contrast": -70.0},  # MEDIUM (~254 px)
+        {"type": "bright_blob", "center": (256.0, 340.0), "radius": 14.0, "contrast": 70.0},  # HIGH (~615 px)
     ]
     ref_img, test_img, _ = create_standard_synthetic_pair(size=512, seed=6601, defects=defects)
     res = run_full_pipeline(test_image=test_img, reference_image=ref_img)

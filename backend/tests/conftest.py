@@ -2,15 +2,15 @@
 
 from pathlib import Path
 from typing import Generator, Tuple
-from fastapi.testclient import TestClient
-import pytest
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import settings
-from app.db.database import Base, build_engine, engine as default_engine, get_db
+import pytest
+from app.db.database import Base, build_engine, get_db
+from app.db.database import engine as default_engine
 from app.db.migrations import upgrade_database_to_head
 from app.main import app
+from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 @pytest.fixture(scope="session", autouse=True)

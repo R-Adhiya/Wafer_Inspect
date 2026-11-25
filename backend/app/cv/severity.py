@@ -14,6 +14,7 @@ explicitly supplied by the user.
 """
 
 from typing import List, Literal, Optional, Sequence, Tuple
+
 from pydantic import BaseModel, Field, model_validator
 
 DefectSeverity = Literal["LOW", "MEDIUM", "HIGH"]
@@ -81,10 +82,7 @@ class SeverityConfig(BaseModel):
             and self.high_area_px is not None
             and self.high_area_px <= self.medium_area_px
         ):
-            raise ValueError(
-                f"high_area_px ({self.high_area_px}) must exceed "
-                f"medium_area_px ({self.medium_area_px})."
-            )
+            raise ValueError(f"high_area_px ({self.high_area_px}) must exceed medium_area_px ({self.medium_area_px}).")
         return self
 
 
@@ -108,9 +106,7 @@ def classify_defect_severity(
         else config.medium_area_fraction * safe_wafer_area
     )
     eff_high_px = (
-        float(config.high_area_px)
-        if config.high_area_px is not None
-        else config.high_area_fraction * safe_wafer_area
+        float(config.high_area_px) if config.high_area_px is not None else config.high_area_fraction * safe_wafer_area
     )
 
     area = float(area_px)

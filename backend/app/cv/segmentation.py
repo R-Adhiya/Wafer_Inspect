@@ -8,6 +8,7 @@ counts, and renders severity-styled bounding box, contour, and final overlays.
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
+
 import cv2
 import numpy as np
 

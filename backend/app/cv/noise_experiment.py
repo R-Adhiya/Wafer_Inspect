@@ -12,10 +12,11 @@ TP, FP, FN, precision, and recall per stage. When not available, reports counts 
 ground_truth to None.
 """
 
-from dataclasses import dataclass
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+
 import cv2
 import numpy as np
 
@@ -199,9 +200,7 @@ def compute_four_cases_from_components(
         areas1.append(area_orig)
 
     # Stage 2: After minimum-area filtering only (raw mask components with area >= min_area_px)
-    cand2: List[Tuple[float, float]] = [
-        cand1[i] for i, area in enumerate(areas1) if area >= float(min_area_px)
-    ]
+    cand2: List[Tuple[float, float]] = [cand1[i] for i, area in enumerate(areas1) if area >= float(min_area_px)]
 
     # Stage 3: After morphological filtering (+ minimum area filtering)
     num3, labels3, stats3, centroids3 = cv2.connectedComponentsWithStats(morph_mask, connectivity=8)
@@ -214,9 +213,7 @@ def compute_four_cases_from_components(
             cand3.append((cx_orig, cy_orig))
 
     # Stage 4: Final defects (the accepted regions of the full pipeline)
-    cand4: List[Tuple[float, float]] = [
-        (float(r.centroid[0]), float(r.centroid[1])) for r in accepted_regions
-    ]
+    cand4: List[Tuple[float, float]] = [(float(r.centroid[0]), float(r.centroid[1])) for r in accepted_regions]
 
     candidates_by_stage = [cand1, cand2, cand3, cand4]
     has_gt = ground_truth is not None

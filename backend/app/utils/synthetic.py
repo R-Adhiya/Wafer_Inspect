@@ -8,8 +8,9 @@ All data produced by this module is purely synthetic and intended solely
 for computer vision inspection and algorithm accuracy validation.
 """
 
-from typing import Any, Dict, List, Literal, Optional, Tuple
 import math
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
 import cv2
 import numpy as np
 
@@ -151,7 +152,7 @@ def generate_layout_centroids(
         ux, uy = math.cos(angle), math.sin(angle)
         nx, ny = -uy, ux
         half_span = float(rng.uniform(0.58, 0.72) * R)  # total span = 1.16..1.44 * R = 58%..72% of diameter
-        max_chord = math.sqrt(max(0.0, (0.90 * R) ** 2 - offset_perp ** 2))
+        max_chord = math.sqrt(max(0.0, (0.90 * R) ** 2 - offset_perp**2))
         half_span = min(half_span, max_chord)
         ts = np.linspace(-half_span, half_span, count) if count > 1 else np.array([0.0])
         for t in ts:
@@ -346,7 +347,7 @@ def generate_synthetic_wafer(
     y, x = np.ogrid[:size, :size]
     center_y, center_x = size / 2.0, size / 2.0
     radius = size * wafer_radius_ratio
-    wafer_mask = (x - center_x) ** 2 + (y - center_y) ** 2 <= radius ** 2
+    wafer_mask = (x - center_x) ** 2 + (y - center_y) ** 2 <= radius**2
 
     # 2. Base canvas (dark background and wafer substrate)
     canvas = np.full((size, size), background_intensity, dtype=np.float32)
@@ -403,7 +404,7 @@ def generate_synthetic_wafer(
                 cx, cy = defect.get("center", (size / 2.0, size / 2.0))
                 r = float(defect.get("radius", defect.get("size", 8.0) / 2.0))
                 dist_sq = (x - cx) ** 2 + (y - cy) ** 2
-                blob_mask = (dist_sq <= r ** 2) & wafer_mask
+                blob_mask = (dist_sq <= r**2) & wafer_mask
                 true_area_visible_px = int(np.count_nonzero(blob_mask))
 
                 if d_type == "bright_blob":

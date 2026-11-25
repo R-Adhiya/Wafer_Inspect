@@ -2,13 +2,14 @@
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import dashboard, experiments, inspection, samples
 from app.core.config import settings
-from app.core.logging import setup_logging, logger
+from app.core.logging import logger, setup_logging
 from app.db.database import engine
 from app.db.migrations import upgrade_database_to_head
 

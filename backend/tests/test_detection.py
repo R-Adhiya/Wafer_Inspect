@@ -11,16 +11,11 @@ Validates:
 """
 
 from io import BytesIO
-from typing import Dict, List
+
 import cv2
-from fastapi.testclient import TestClient
 import numpy as np
 import pytest
-from PIL import Image
-
-from app.core.config import settings
 from app.cv.detection import (
-    align_reference,
     apply_morphology,
     apply_threshold,
     count_connected_candidates,
@@ -30,9 +25,11 @@ from app.cv.detection import (
     morph_erode,
     morph_open,
 )
-from app.cv.pipeline import DetectionConfig, PreprocessingConfig, run_detection
+from app.cv.pipeline import DetectionConfig, run_detection
 from app.main import app
 from app.utils.synthetic import create_standard_synthetic_pair, generate_synthetic_wafer
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 
@@ -117,7 +114,9 @@ def test_golden_detection_finds_injected_defects():
         gt_cx, gt_cy = gt["center"]
         dists = [np.hypot(c[0] - gt_cx, c[1] - gt_cy) for c in detected_centroids]
         min_dist = min(dists)
-        assert min_dist <= 12.0, f"Defect {gt['type']} at ({gt_cx}, {gt_cy}) had nearest match at distance {min_dist:.1f}"
+        assert min_dist <= 12.0, (
+            f"Defect {gt['type']} at ({gt_cx}, {gt_cy}) had nearest match at distance {min_dist:.1f}"
+        )
 
 
 def test_golden_clean_wafer_produces_zero_candidates():
@@ -272,7 +271,12 @@ def test_no_reference_wafer_edge_not_flagged():
     # Check edge touching and clean candidate count
     morph_mask = result.morphology_mask
     h, w = morph_mask.shape
-    border_pixels = np.sum(morph_mask[0, :]) + np.sum(morph_mask[h - 1, :]) + np.sum(morph_mask[:, 0]) + np.sum(morph_mask[:, w - 1])
+    border_pixels = (
+        np.sum(morph_mask[0, :])
+        + np.sum(morph_mask[h - 1, :])
+        + np.sum(morph_mask[:, 0])
+        + np.sum(morph_mask[:, w - 1])
+    )
     assert border_pixels == 0
     assert count_connected_candidates(morph_mask) == 0
 

@@ -15,24 +15,23 @@ Validates:
    and clean wafer returns `INSUFFICIENT_DATA`.
 """
 
-from io import BytesIO
 import json
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
-import pytest
+from io import BytesIO
 
+import numpy as np
+import pytest
 from app.core.config import settings
 from app.cv.pattern_analysis import PatternConfig, analyze_spatial_pattern
-from app.cv.pipeline import DetectionConfig, PreprocessingConfig, run_full_pipeline
+from app.cv.pipeline import DetectionConfig, run_full_pipeline
 from app.main import app
 from app.utils.synthetic import (
     DefectLayout,
-    LAYOUT_TO_PATTERN_LABEL,
     generate_layout_centroids,
     generate_layout_wafer,
     generate_synthetic_wafer,
 )
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 
@@ -133,8 +132,22 @@ def test_insufficient_data_and_single_elongated_scratch_exception():
     radius = 225.28  # diameter = 450.56 -> 15% = 67.6 px
 
     two_blobs = [
-        {"id": 1, "centroid": (200.0, 200.0), "area_px": 150, "length_px": 14.0, "elongation": 1.1, "severity": "MEDIUM"},
-        {"id": 2, "centroid": (300.0, 280.0), "area_px": 160, "length_px": 15.0, "elongation": 1.2, "severity": "MEDIUM"},
+        {
+            "id": 1,
+            "centroid": (200.0, 200.0),
+            "area_px": 150,
+            "length_px": 14.0,
+            "elongation": 1.1,
+            "severity": "MEDIUM",
+        },
+        {
+            "id": 2,
+            "centroid": (300.0, 280.0),
+            "area_px": 160,
+            "length_px": 15.0,
+            "elongation": 1.2,
+            "severity": "MEDIUM",
+        },
     ]
     res_insuff = analyze_spatial_pattern(
         measurements=two_blobs,
@@ -146,7 +159,14 @@ def test_insufficient_data_and_single_elongated_scratch_exception():
     assert "2" in res_insuff.explanation
 
     single_scratch = [
-        {"id": 1, "centroid": (256.0, 256.0), "area_px": 320, "length_px": 95.0, "elongation": 19.0, "severity": "MEDIUM"},
+        {
+            "id": 1,
+            "centroid": (256.0, 256.0),
+            "area_px": 320,
+            "length_px": 95.0,
+            "elongation": 19.0,
+            "severity": "MEDIUM",
+        },
     ]
     res_scratch = analyze_spatial_pattern(
         measurements=single_scratch,

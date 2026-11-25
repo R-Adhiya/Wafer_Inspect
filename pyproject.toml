@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waferinspect"
+version = "0.1.0"
+description = "Die-to-Database Automated Wafer Defect Inspection System"
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length handled by ruff format
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+addopts = "-v --cov=app --cov-report=term --cov-fail-under=88"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.testclient.*",
+]

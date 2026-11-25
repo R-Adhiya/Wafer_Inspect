@@ -15,20 +15,19 @@ Validates:
 """
 
 from io import BytesIO
-import cv2
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
 
+import cv2
+import numpy as np
 from app.cv.noise_filter import NoiseFilterConfig, compute_region_aspect_ratio, filter_regions
-from app.cv.pipeline import DetectionConfig, PreprocessingConfig, run_full_pipeline
+from app.cv.pipeline import DetectionConfig, run_full_pipeline
 from app.cv.segmentation import (
-    build_filtered_mask_and_labels,
     map_region_to_original_coords,
     segment_regions,
 )
 from app.main import app
 from app.utils.synthetic import create_standard_synthetic_pair, generate_synthetic_wafer
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 

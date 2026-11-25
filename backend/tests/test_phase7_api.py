@@ -12,17 +12,17 @@ Validates:
    p-values format as "p < 0.001" rather than "0.0005".
 """
 
-from io import BytesIO
 import uuid
-from fastapi.testclient import TestClient
-import numpy as np
-from PIL import Image
+from io import BytesIO
 
+import numpy as np
 from app.cv.pattern_analysis import PatternConfig, analyze_spatial_pattern
 from app.cv.pipeline import DetectionConfig, PreprocessingConfig, run_full_pipeline
 from app.main import app
 from app.services.status_store import PIPELINE_STAGES
 from app.utils.synthetic import generate_layout_centroids, generate_layout_wafer
+from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(app)
 

@@ -5,24 +5,22 @@ database-backed API endpoints, history queries, dashboard stats, samples, and fa
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
-from fastapi.testclient import TestClient
+
 import numpy as np
-from PIL import Image
 import pytest
-from sqlalchemy import create_engine, inspect as sa_inspect
+from app.core.config import settings
+from app.db import crud
+from app.db.database import Base, build_engine
+from app.db.migrations import upgrade_database_to_head
+from app.db.models import Defect, Inspection, ProcessingRun
+from app.services.sample_service import SYNTHETIC_DISCLAIMER
+from app.utils.synthetic import generate_layout_wafer
+from PIL import Image
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import CreateIndex, CreateTable
-
-from app.core.config import settings
-from app.db import crud
-from app.db.database import Base, build_engine, get_db
-from app.db.migrations import upgrade_database_to_head
-from app.db.models import Defect, Inspection, ProcessingRun
-from app.main import app
-from app.services.sample_service import SAMPLE_CATALOG, SYNTHETIC_DISCLAIMER
-from app.utils.synthetic import generate_layout_wafer
 
 
 def _png_bytes(arr: np.ndarray) -> bytes:

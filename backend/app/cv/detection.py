@@ -9,9 +9,10 @@ Provides pure functions for classical computer vision wafer defect detection:
 6. Connected component analysis and candidate region tracking across pipeline stages.
 """
 
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
+
 import cv2
 import numpy as np
 
@@ -166,13 +167,19 @@ def align_reference(
         )
         logger.info(
             "Alignment applied: shift=(%.2f, %.2f) px, magnitude=%.2f px, response=%.4f",
-            dx, dy, shift_magnitude, response,
+            dx,
+            dy,
+            shift_magnitude,
+            response,
         )
     else:
         aligned_reference = reference_image.copy()
         logger.info(
             "Alignment skipped: shift=(%.2f, %.2f) px, magnitude=%.2f px, response=%.4f",
-            dx, dy, shift_magnitude, response,
+            dx,
+            dy,
+            shift_magnitude,
+            response,
         )
 
     return aligned_reference, alignment_info
@@ -372,10 +379,7 @@ def apply_threshold(
 
     # Otsu low-contrast guard
     if method_clean == "otsu" and p999 < min_robust_contrast:
-        reason = (
-            f"no significant difference found (p99.9={p999:.2f} < "
-            f"min_contrast={min_robust_contrast:.1f})"
-        )
+        reason = f"no significant difference found (p99.9={p999:.2f} < min_contrast={min_robust_contrast:.1f})"
         logger.info("Threshold guard triggered: %s", reason)
         return np.zeros_like(diff_image), 0.0, reason
 

@@ -10,11 +10,11 @@ import json
 import math
 import shutil
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import HTTPException
+
 import numpy as np
+from fastapi import HTTPException
 from PIL import Image
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -397,9 +397,7 @@ def run_inspection_pipeline(
         test_filename: str = inspection_row.original_filename if inspection_row else test_image_path.name
         test_mode: Optional[str] = inspection_row.image_mode if inspection_row else None
         test_format: str = inspection_row.image_format if inspection_row else "PNG"
-        test_file_size: int = (
-            int(inspection_row.file_size) if inspection_row else int(test_image_path.stat().st_size)
-        )
+        test_file_size: int = int(inspection_row.file_size) if inspection_row else int(test_image_path.stat().st_size)
         reference_filename: Optional[str] = inspection_row.reference_filename if inspection_row else None
 
         upload_meta_path = upload_dir / "meta.json"
@@ -500,7 +498,9 @@ def run_inspection_pipeline(
             try:
                 prep_config = PreprocessingConfig(**prep_overrides) if prep_overrides else PreprocessingConfig()
                 det_config = DetectionConfig(**detection_overrides) if detection_overrides else DetectionConfig()
-                filter_config = NoiseFilterConfig(**noise_filter_overrides) if noise_filter_overrides else NoiseFilterConfig()
+                filter_config = (
+                    NoiseFilterConfig(**noise_filter_overrides) if noise_filter_overrides else NoiseFilterConfig()
+                )
                 measurement_config = (
                     MeasurementConfig(**measurement_overrides) if measurement_overrides else MeasurementConfig()
                 )
@@ -561,7 +561,9 @@ def run_inspection_pipeline(
             Image.fromarray(pipeline_result.bboxes_image).save(results_dir / "bboxes.png", format="PNG")
             Image.fromarray(pipeline_result.contours_image).save(results_dir / "contours.png", format="PNG")
             Image.fromarray(pipeline_result.final_overlay_image).save(results_dir / "final_overlay.png", format="PNG")
-            Image.fromarray(pipeline_result.pattern_overlay_image).save(results_dir / "pattern_overlay.png", format="PNG")
+            Image.fromarray(pipeline_result.pattern_overlay_image).save(
+                results_dir / "pattern_overlay.png", format="PNG"
+            )
 
             regions_by_id = {r.id: r for r in pipeline_result.accepted_regions}
             defect_db_records: List[Dict[str, Any]] = []
@@ -767,6 +769,7 @@ def run_inspection_pipeline(
                         gt_spec = m_data.get("ground_truth")
 
                 from app.cv.noise_experiment import evaluate_inspection_noise_experiment
+
                 noise_data = evaluate_inspection_noise_experiment(
                     result=pipeline_result,
                     min_area_px=filter_config.min_area_px,
@@ -960,9 +963,7 @@ def get_inspection_status_by_id(db: Session, inspection_id: int) -> InspectionSt
     )
 
 
-def get_inspection_noise_experiment_by_id(
-    db: Session, inspection_id: int
-) -> InspectionNoiseExperimentResponse:
+def get_inspection_noise_experiment_by_id(db: Session, inspection_id: int) -> InspectionNoiseExperimentResponse:
     """Return four-stage noise experiment candidate metrics for a completed inspection."""
     try:
         row = crud.get_inspection(db, inspection_id)

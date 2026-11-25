@@ -57,5 +57,8 @@ models/*.pt
 .DS_Store
 Thumbs.db
 
-# Test scripts artifacts
-scripts/*.png
+# Coverage and linter caches
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
